@@ -36,8 +36,12 @@ cd ~/Projects/valhalla
 cargo build --release
 ```
 
-Requirements: `rust`, `cargo`, `gtk4-devel`, `libadwaita-devel`,
-`libsecret-devel`, `glib2-devel`, `blueprint-compiler`, `glib2-devel`.
+Requirements (Fedora, run inside the container):
+
+```sh
+sudo dnf install -y rust cargo rustfmt clippy gcc pkgconf-pkg-config \
+    gtk4-devel libadwaita-devel libsecret-devel glib2-devel blueprint-compiler git
+```
 
 ## Running
 
