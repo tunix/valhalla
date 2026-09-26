@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.tunix.valhalla</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>Valhalla</name>
+  <summary>Theme-aware wallpaper switcher</summary>
+  <description>
+    <p>A minimal wallpaper application that selects wallpapers from online sources and matches them to your desktop's light or dark appearance, so dark mode never gets a blinding white wallpaper.</p>
+  </description>
+  <launchable type="desktop-id">io.github.tunix.valhalla.desktop</launchable>
+  <url type="homepage">https://github.com/tunix/valhalla</url>
+  <content_rating type="oars-1.1" />
+  <releases>
+    <release version="0.1.0" date="2026-09-27" />
+  </releases>
+</component>

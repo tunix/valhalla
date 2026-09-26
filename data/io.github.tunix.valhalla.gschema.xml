@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="io.github.tunix.valhalla" path="/io/github/tunix/valhalla/">
+    <key name="active-source" type="s">
+      <default>"wallhaven"</default>
+      <summary>Active wallpaper source</summary>
+      <description>Identifier of the currently selected wallpaper source.</description>
+    </key>
+    <key name="refresh-interval" type="u">
+      <default>60</default>
+      <summary>Automatic refresh interval in minutes</summary>
+      <description>Zero disables automatic refresh.</description>
+    </key>
+    <key name="match-theme" type="b">
+      <default>true</default>
+      <summary>Match desktop theme</summary>
+      <description>Pick wallpapers that suit the current light or dark appearance.</description>
+    </key>
+    <key name="match-strictness" type="s">
+      <default>"prefer"</default>
+      <summary>Theme match strictness</summary>
+      <description>"prefer" falls back to any wallpaper, "require" keeps the current one when nothing matches.</description>
+    </key>
+    <key name="brightness-threshold" type="d">
+      <default>0.45</default>
+      <summary>Brightness threshold</summary>
+      <description>Wallpapers with an average brightness below this are considered dark.</description>
+    </key>
+    <key name="refresh-on-theme-change" type="b">
+      <default>true</default>
+      <summary>Refresh on theme change</summary>
+      <description>Switch the wallpaper immediately when the light/dark preference changes.</description>
+    </key>
+    <key name="refresh-on-startup" type="b">
+      <default>false</default>
+      <summary>Refresh on startup</summary>
+      <description>Download a fresh wallpaper when the app or daemon starts. Off by default.</description>
+    </key>
+    <key name="run-in-background" type="b">
+      <default>false</default>
+      <summary>Run in the background</summary>
+      <description>Keep refreshing wallpapers while the window is closed.</description>
+    </key>
+    <key name="apply-lockscreen" type="b">
+      <default>false</default>
+      <summary>Also change the lock screen</summary>
+      <description>Apply wallpapers to the lock screen as well.</description>
+    </key>
+    <key name="screen-geometry" type="s">
+      <default>"1920x1080"</default>
+      <summary>Primary screen geometry</summary>
+      <description>Size of the largest connected monitor, probed automatically. Never set this manually.</description>
+    </key>
+    <key name="wallhaven-query" type="s">
+      <default>""</default>
+      <summary>Wallhaven tag query</summary>
+      <description>Search tags; prefix with + to require or - to exclude.</description>
+    </key>
+    <key name="wallhaven-categories" type="s">
+      <default>"111"</default>
+      <summary>Wallhaven categories</summary>
+      <description>General/anime/people switches, in order.</description>
+    </key>
+    <key name="wallhaven-purity" type="s">
+      <default>"100"</default>
+      <summary>Wallhaven purity</summary>
+      <description>SFW/sketchy/NSFW switches, in order. NSFW needs an API key.</description>
+    </key>
+    <key name="wallhaven-sorting" type="s">
+      <default>"random"</default>
+      <summary>Wallhaven sorting</summary>
+      <description>Sorting method for search results.</description>
+    </key>
+    <key name="unsplash-query" type="s">
+      <default>""</default>
+      <summary>Unsplash query</summary>
+      <description>Search terms for Unsplash.</description>
+    </key>
+    <key name="unsplash-content-filter" type="s">
+      <default>"low"</default>
+      <summary>Unsplash content filter</summary>
+      <description>low or high content safety level.</description>
+    </key>
+  </schema>
+</schemalist>
