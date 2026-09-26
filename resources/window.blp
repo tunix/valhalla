@@ -1,0 +1,115 @@
+using Gtk 4.0;
+using Adw 1;
+
+template $ValhallaWindow : Adw.ApplicationWindow {
+  title: _("Valhalla");
+  default-width: 720;
+  default-height: 540;
+  width-request: 360;
+  height-request: 300;
+
+  content: Adw.ToastOverlay toast_overlay {
+    child: Adw.ToolbarView {
+
+      [top]
+      Adw.HeaderBar {
+        title-widget: Gtk.Box dropdown_box {
+          spacing: 6;
+        };
+
+        [end]
+        Gtk.MenuButton {
+          primary: true;
+          icon-name: "open-menu-symbolic";
+          tooltip-text: _("Main Menu");
+          menu-model: primary_menu;
+        }
+
+        [end]
+        Gtk.Stack refresh_stack {
+          transition-type: crossfade;
+
+          Gtk.StackPage {
+            name: "button";
+            child: Gtk.Button refresh_button {
+              action-name: "win.refresh";
+              icon-name: "view-refresh-symbolic";
+              tooltip-text: _("Refresh now");
+            };
+          }
+
+          Gtk.StackPage {
+            name: "spinner";
+            child: Adw.Clamp {
+              maximum-size: 16;
+              child: Gtk.Spinner refresh_spinner {
+                spinning: true;
+              };
+            };
+          }
+        }
+      }
+
+      content: Gtk.Box {
+        orientation: vertical;
+
+        Adw.Banner status_banner {
+          revealed: false;
+        }
+
+        Gtk.Box preview_box {
+          orientation: vertical;
+          vexpand: true;
+          valign: center;
+          spacing: 12;
+          margin-top: 12;
+          margin-bottom: 12;
+          margin-start: 12;
+          margin-end: 12;
+
+          Gtk.Overlay preview_overlay {
+            halign: center;
+            valign: center;
+
+            child: Gtk.Picture wallpaper_picture {
+              overflow: hidden;
+              styles ["preview"]
+            };
+          }
+
+          Gtk.Label info_label {
+            wrap: true;
+            justify: center;
+            halign: center;
+            styles ["dimmed"]
+          }
+        }
+      };
+    };
+  };
+}
+
+menu primary_menu {
+  section {
+    item {
+      label: _("Refresh now");
+      action: "win.refresh";
+    }
+  }
+  section {
+    item {
+      label: _("_Preferences");
+      action: "win.preferences";
+    }
+  }
+  section {
+    item {
+      label: _("_About Valhalla");
+      action: "win.about";
+    }
+    item {
+      label: _("_Quit");
+      action: "app.quit";
+    }
+  }
+}
