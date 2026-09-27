@@ -1,6 +1,6 @@
 [package]
 name = "valhalla"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2021"
 description = "Theme-aware wallpaper switcher for Linux desktops"
 license = "GPL-3.0"
