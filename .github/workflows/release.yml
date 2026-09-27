@@ -27,10 +27,14 @@ jobs:
     # Nothing to do on a manual dispatch; skip it to save a run.
     if: github.event_name != 'workflow_dispatch'
     steps:
+      # NOTE: deliberately no `release-type` input here. Setting it switches
+      # the action to its Manifest.fromConfig() code path, which ignores
+      # .github/release-please-config.json entirely — including "draft": true —
+      # so the release is created PUBLISHED (immutable) and the later artifact
+      # uploads fail with "Cannot upload asset ... to an immutable release".
+      # Without the input the action reads the config file itself.
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         id: release
-        with:
-          release-type: rust
 
   artifacts:
     name: Package release artifacts (${{ matrix.arch }})
