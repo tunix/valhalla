@@ -1,0 +1,66 @@
+name: Release
+
+on:
+  # Deliberately NOT path-gated: release-please must observe every merge to
+  # keep the changelog complete, and it is a no-op when no release is due.
+  # The artifacts job only runs when a release is actually created.
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    name: Release please
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          release-type: rust
+
+  artifacts:
+    name: Package release artifacts
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    container: fedora:latest
+    env:
+      TAG: ${{ needs.release-please.outputs.tag_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: >
+          dnf install -y rust cargo rustfmt clippy gcc pkgconf-pkg-config
+          gtk4-devel libadwaita-devel libsecret-devel glib2-devel
+          blueprint-compiler git
+
+      - name: Cache cargo artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            /root/.cargo/registry
+            /root/.cargo/git
+          key: fedora-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: fedora-cargo-
+
+      - name: Build release binary
+        run: cargo build --release --locked
+
+      - name: Package tarball
+        run: |
+          install -D -m 0755 target/release/valhalla "valhalla-${TAG}/valhalla"
+          install -D -m 0644 data/valhalla.service "valhalla-${TAG}/data/valhalla.service"
+          tar -czf "valhalla-${TAG}-x86_64.tar.gz" "valhalla-${TAG}"
+
+      - name: Upload release artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.release-please.outputs.tag_name }}
+          files: valhalla-*-x86_64.tar.gz
