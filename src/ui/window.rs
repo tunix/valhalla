@@ -149,7 +149,7 @@ impl Window {
                 dialog.set_application_icon("io.github.tunix.valhalla");
                 dialog.set_version(env!("CARGO_PKG_VERSION"));
                 dialog.set_website("https://github.com/tunix/valhalla");
-                dialog.set_developer_name("Tunix");
+                dialog.set_developer_name("Alper Kanat");
                 dialog.set_comments("Theme-aware wallpaper switcher for Linux desktops");
                 dialog.set_license_type(gtk::License::Gpl30Only);
                 dialog.present(Some(&win));
