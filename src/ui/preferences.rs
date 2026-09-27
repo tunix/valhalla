@@ -187,31 +187,69 @@ fn general_page(settings: &gio::Settings) -> adw::PreferencesPage {
 
 /// Switch backed by the systemd user unit: installs/enables the headless
 /// daemon at login, stops/disables it when turned off.
+///
+/// All systemd work runs on a blocking thread and results are marshalled
+/// back through a channel: `systemctl --user` talks to the user manager over
+/// D-Bus and (inside a flatpak, where the session bus socket is not exported
+/// to the sandbox) can block for the full D-Bus timeout. Running it inline in
+/// the `active` handler froze the main loop and made GNOME report the window
+/// as not responding. GTK widgets are only touched from the main thread.
 fn login_service_row() -> adw::SwitchRow {
     let row = adw::SwitchRow::new();
     row.set_title("Start automatically at login");
     row.set_subtitle("Runs a headless service for scheduled wallpaper refreshes");
-    row.set_active(crate::systemd::is_enabled());
 
     let handler: std::rc::Rc<std::cell::RefCell<Option<glib::SignalHandlerId>>> =
         Default::default();
-    let id = {
+    // Programmatic switch updates from the probe and the toggle workers
+    // (enabled state to set). Only ever consumed on the main thread.
+    let (tx, rx) = async_channel::unbounded::<bool>();
+
+    // Reflect the current enabled state once the async probe returns. The row
+    // starts off so no synchronous systemctl call happens at build time.
+    {
+        let tx = tx.clone();
+        crate::tokio_handle().spawn_blocking(move || {
+            let _ = tx.send_blocking(crate::systemd::is_enabled());
+        });
+    }
+
+    {
         let handler = handler.clone();
-        row.connect_active_notify(move |row| {
-            let result = if row.is_active() {
-                crate::systemd::enable_start()
-            } else {
-                crate::systemd::stop_disable()
-            };
-            if let Err(e) = result {
-                tracing::warn!("systemd service toggle failed: {e}");
-                // Revert the switch without re-triggering this handler.
+        let row_weak = row.downgrade();
+        glib::spawn_future_local(async move {
+            while let Ok(enabled) = rx.recv().await {
+                let Some(row) = row_weak.upgrade() else {
+                    continue;
+                };
                 if let Some(id) = handler.borrow().as_ref() {
                     row.block_signal(id);
-                    row.set_active(!row.is_active());
+                    row.set_active(enabled);
                     row.unblock_signal(id);
                 }
             }
+        });
+    }
+
+    let id = {
+        let tx = tx.clone();
+        row.connect_active_notify(move |row| {
+            let turning_on = row.is_active();
+            let tx = tx.clone();
+            let h = crate::tokio_handle().clone();
+            h.spawn_blocking(move || {
+                let result = if turning_on {
+                    crate::systemd::enable_start()
+                } else {
+                    crate::systemd::stop_disable()
+                };
+                if let Err(e) = result {
+                    tracing::warn!("systemd service toggle failed: {e}");
+                    // Revert the switch; the handler is blocked during the
+                    // programmatic set so this does not re-trigger the toggle.
+                    let _ = tx.send_blocking(!turning_on);
+                }
+            });
         })
     };
     *handler.borrow_mut() = Some(id);
