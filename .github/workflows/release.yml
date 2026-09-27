@@ -99,13 +99,5 @@ jobs:
     steps:
       - name: Flip the draft release to published
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          RELEASE_ID=$(curl -sSf -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" \
-            | python3 -c "import json, sys; print(json.load(sys.stdin)['id'])")
-          curl -sSf -X PATCH \
-            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
-            -d '{"draft": false}' > /dev/null
-          echo "Release ${TAG} published"
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "$TAG" --draft=false --repo "$GITHUB_REPOSITORY"
