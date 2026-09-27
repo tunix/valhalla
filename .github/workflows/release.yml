@@ -25,13 +25,21 @@ jobs:
           release-type: rust
 
   artifacts:
-    name: Package release artifacts
     needs: release-please
     if: needs.release-please.outputs.release_created == 'true'
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    name: Package release artifacts (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
     container: fedora:latest
     env:
       TAG: ${{ needs.release-please.outputs.tag_name }}
+      ARCH: ${{ matrix.arch }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -47,8 +55,8 @@ jobs:
           path: |
             /root/.cargo/registry
             /root/.cargo/git
-          key: fedora-cargo-${{ hashFiles('Cargo.lock') }}
-          restore-keys: fedora-cargo-
+          key: fedora-cargo-${{ matrix.arch }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: fedora-cargo-${{ matrix.arch }}-
 
       - name: Build release binary
         run: cargo build --release --locked
@@ -57,10 +65,10 @@ jobs:
         run: |
           install -D -m 0755 target/release/valhalla "valhalla-${TAG}/valhalla"
           install -D -m 0644 data/valhalla.service "valhalla-${TAG}/data/valhalla.service"
-          tar -czf "valhalla-${TAG}-x86_64.tar.gz" "valhalla-${TAG}"
+          tar -czf "valhalla-${TAG}-${ARCH}.tar.gz" "valhalla-${TAG}"
 
       - name: Upload release artifacts
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           tag_name: ${{ needs.release-please.outputs.tag_name }}
-          files: valhalla-*-x86_64.tar.gz
+          files: valhalla-*-${{ matrix.arch }}.tar.gz
