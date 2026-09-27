@@ -106,10 +106,61 @@ jobs:
           draft: true
           files: valhalla-*-${{ matrix.arch }}.tar.gz
 
+  flatpak:
+    name: Flatpak bundle (${{ matrix.arch }})
+    needs: release-please
+    if: >-
+      always() &&
+      (needs.release-please.outputs.release_created == 'true' ||
+       github.event_name == 'workflow_dispatch')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    env:
+      TAG: ${{ inputs.tag || needs.release-please.outputs.tag_name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Keep the vendor list in lockstep with Cargo.lock: regenerate it from
+      # the lockfile on every run instead of trusting a committed copy that
+      # renovate can silently strand behind. The generator script is pinned
+      # in-repo (flatpak/) so the source list stays deterministic.
+      - name: Regenerate cargo vendor sources from Cargo.lock
+        run: |
+          python3 -m venv .venv-flatpak
+          .venv-flatpak/bin/pip install -q 'aiohttp<4.0.0,>=3.9.5' 'PyYAML<7.0.0,>=6.0.2' 'tomlkit>=0.13.3,<1.0'
+          .venv-flatpak/bin/python flatpak/flatpak-cargo-generator.py Cargo.lock \
+            -o flatpak/generated-sources.json
+
+      - name: Build flatpak bundle
+        uses: flathub-infra/flatpak-github-actions/flatpak-builder@933e9e8ca36e85046ebca8e211f0785c6becac40 # master @ 933e9e8
+        with:
+          bundle: valhalla-${{ env.TAG }}-${{ matrix.arch }}.flatpak
+          manifest-path: flatpak/io.github.tunix.valhalla.json
+          arch: ${{ matrix.arch }}
+          branch: stable
+          cache-key: flatpak-builder-${{ github.sha }}
+
+      # The release is a draft while artifacts build; bundles attach alongside
+      # the tarballs before publish flips the draft (immutable releases reject
+      # late asset uploads).
+      - name: Attach bundle to the draft release
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          tag_name: ${{ env.TAG }}
+          draft: true
+          files: valhalla-*-${{ matrix.arch }}.flatpak
+
   publish:
     name: Publish release
-    needs: [release-please, artifacts]
-    if: always() && needs.artifacts.result == 'success'
+    needs: [release-please, artifacts, flatpak]
+    if: always() && needs.artifacts.result == 'success' && needs.flatpak.result == 'success'
     runs-on: ubuntu-latest
     env:
       TAG: ${{ inputs.tag || needs.release-please.outputs.tag_name }}
