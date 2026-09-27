@@ -50,7 +50,12 @@ fn main() {
 }
 
 fn register_resources() {
-    let resource = gio::Resource::load(concat!(env!("OUT_DIR"), "/valhalla.gresource"))
-        .expect("failed to load compiled GResource");
+    // Embed the compiled GResource in the binary. Loading it from OUT_DIR
+    // only works on the build machine (dev cargo run) — an installed or
+    // packaged binary (flatpak, release tarball) must carry the resource
+    // with it, and OUT_DIR does not exist at runtime there.
+    const RESOURCE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/valhalla.gresource"));
+    let resource = gio::Resource::from_data(&glib::Bytes::from_static(RESOURCE))
+        .expect("failed to load embedded GResource");
     gio::resources_register(&resource);
 }
