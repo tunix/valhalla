@@ -1,0 +1,52 @@
+{
+  "id": "io.github.tunix.valhalla",
+  "runtime": "org.gnome.Platform",
+  "runtime-version": "49",
+  "sdk": "org.gnome.Sdk",
+  "sdk-extensions": [
+    "org.freedesktop.Sdk.Extension.rust-stable"
+  ],
+  "command": "valhalla",
+  "finish-args": [
+    "--share=network",
+    "--share=ipc",
+    "--socket=fallback-x11",
+    "--socket=wayland",
+    "--device=dri",
+    "--talk-name=org.freedesktop.portal.Desktop",
+    "--talk-name=org.freedesktop.secrets",
+    "--talk-name=org.freedesktop.systemd1",
+    "--own-name=org.kde.StatusNotifierItem-*"
+  ],
+  "build-options": {
+    "append-path": "/usr/lib/sdk/rust-stable/bin",
+    "env": {
+      "CARGO_HOME": "/run/build/valhalla/cargo"
+    }
+  },
+  "modules": [
+    {
+      "name": "valhalla",
+      "buildsystem": "simple",
+      "build-commands": [
+        "cargo --offline build --release --locked",
+        "install -Dm0755 target/release/valhalla -t /app/bin/",
+        "install -Dm0644 data/io.github.tunix.valhalla.desktop.in /app/share/applications/io.github.tunix.valhalla.desktop",
+        "install -Dm0644 data/io.github.tunix.valhalla.metainfo.xml -t /app/share/metainfo/",
+        "install -Dm0644 data/io.github.tunix.valhalla.gschema.xml -t /app/share/glib-2.0/schemas/",
+        "glib-compile-schemas /app/share/glib-2.0/schemas",
+        "install -Dm0644 data/icons/hicolor/scalable/apps/io.github.tunix.valhalla.svg /app/share/icons/hicolor/scalable/apps/io.github.tunix.valhalla.svg",
+        "install -Dm0644 data/icons/hicolor/128x128/apps/io.github.tunix.valhalla.png /app/share/icons/hicolor/128x128/apps/io.github.tunix.valhalla.png",
+        "install -Dm0644 data/icons/hicolor/256x256/apps/io.github.tunix.valhalla.png /app/share/icons/hicolor/256x256/apps/io.github.tunix.valhalla.png",
+        "install -Dm0644 data/icons/hicolor/512x512/apps/io.github.tunix.valhalla.png /app/share/icons/hicolor/512x512/apps/io.github.tunix.valhalla.png"
+      ],
+      "sources": [
+        {
+          "type": "dir",
+          "path": ".."
+        },
+        "generated-sources.json"
+      ]
+    }
+  ]
+}
