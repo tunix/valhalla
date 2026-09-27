@@ -4,7 +4,8 @@
   "draft": true,
   "packages": {
     ".": {
-      "package-name": "valhalla"
+      "package-name": "valhalla",
+      "include-component-in-tag": false
     }
   }
 }
