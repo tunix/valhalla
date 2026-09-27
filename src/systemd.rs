@@ -84,8 +84,23 @@ pub fn stop_disable() -> Result<(), String> {
 mod tests {
     use super::*;
 
+    /// A user systemd manager is required for the lifecycle test: it drives
+    /// the real `systemctl --user`. CI containers (e.g. fedora:latest) have
+    /// no user bus / XDG_RUNTIME_DIR, so skip instead of failing there.
+    fn user_systemd_available() -> bool {
+        std::process::Command::new("systemctl")
+            .args(["--user", "is-system-running"])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+
     #[test]
     fn service_lifecycle() {
+        if !user_systemd_available() {
+            eprintln!("skipping service_lifecycle: no user systemd manager");
+            return;
+        }
         // No --now here: the test must not launch the daemon.
         install().expect("unit installed");
         assert!(unit_path().exists());
