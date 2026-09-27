@@ -3,6 +3,10 @@
   <id>io.github.tunix.valhalla</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0</project_license>
+  <developer id="io.github.tunix">
+    <name translate="no">Alper Kanat</name>
+  </developer>
+  <update_contact>tunix@src.gnome.org</update_contact>
   <name>Valhalla</name>
   <summary>Theme-aware wallpaper switcher</summary>
   <description>
@@ -10,8 +14,47 @@
   </description>
   <launchable type="desktop-id">io.github.tunix.valhalla.desktop</launchable>
   <url type="homepage">https://github.com/tunix/valhalla</url>
+  <url type="bugtracker">https://github.com/tunix/valhalla/issues</url>
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+    <control>touch</control>
+  </supports>
+  <screenshots>
+    <screenshot type="default">
+      <image>https://raw.githubusercontent.com/tunix/valhalla/main/docs/screenshots/dark.png</image>
+      <caption>Dark style wallpaper in dark mode</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/tunix/valhalla/main/docs/screenshots/light.png</image>
+      <caption>Light style wallpaper in light mode</caption>
+    </screenshot>
+  </screenshots>
   <content_rating type="oars-1.1" />
   <releases>
-    <release version="0.1.0" date="2026-09-27" />
+    <release version="0.3.0" date="2026-09-27">
+      <description>
+        <ul>
+          <li>Horizon logo as the official app icon</li>
+          <li>Cached HTTP client for image downloads</li>
+        </ul>
+      </description>
+    </release>
+    <release version="0.2.0" date="2026-09-27">
+      <description>
+        <ul>
+          <li>Headless daemon mode with systemd user service management</li>
+          <li>Wallhaven and Unsplash sources with tag, purity and orientation filters</li>
+          <li>Perceptual brightness analysis for theme-aware selection</li>
+        </ul>
+      </description>
+    </release>
+    <release version="0.1.0" date="2026-09-27">
+      <description>
+        <ul>
+          <li>Initial release</li>
+        </ul>
+      </description>
+    </release>
   </releases>
 </component>
