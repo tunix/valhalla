@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <clipPath id="horizon-disc">
+      <circle cx="256" cy="256" r="240"/>
+    </clipPath>
+    <linearGradient id="horizon-day" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fdf7ea"/>
+      <stop offset="1" stop-color="#f6d9a6"/>
+    </linearGradient>
+    <linearGradient id="horizon-night" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2d2840"/>
+      <stop offset="1" stop-color="#161320"/>
+    </linearGradient>
+    <linearGradient id="horizon-ridge" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#332c4c"/>
+      <stop offset="1" stop-color="#1c1830"/>
+    </linearGradient>
+    <radialGradient id="horizon-sun" cx="0.4" cy="0.35" r="0.95">
+      <stop offset="0" stop-color="#ffe170"/>
+      <stop offset="1" stop-color="#f6a72d"/>
+    </radialGradient>
+    <mask id="horizon-moon">
+      <circle cx="358" cy="354" r="42" fill="#ffffff"/>
+      <circle cx="376" cy="338" r="35" fill="#000000"/>
+    </mask>
+  </defs>
+  <g clip-path="url(#horizon-disc)">
+    <rect width="512" height="512" fill="url(#horizon-night)"/>
+    <polygon points="0,0 512,0 512,288 430,238 342,298 262,212 172,298 92,232 0,328" fill="url(#horizon-day)"/>
+    <polygon points="0,322 92,226 172,292 262,206 342,292 430,232 512,282 512,512 0,512" fill="url(#horizon-ridge)"/>
+    <circle cx="164" cy="138" r="52" fill="url(#horizon-sun)"/>
+    <g mask="url(#horizon-moon)">
+      <circle cx="358" cy="354" r="42" fill="#f8f0e3"/>
+    </g>
+    <circle cx="446" cy="328" r="5" fill="#f8f0e3"/>
+    <circle cx="404" cy="390" r="4" fill="#f8f0e3" opacity="0.9"/>
+    <circle cx="308" cy="366" r="3.5" fill="#f8f0e3" opacity="0.8"/>
+    <circle cx="238" cy="418" r="4" fill="#f8f0e3" opacity="0.85"/>
+  </g>
+</svg>

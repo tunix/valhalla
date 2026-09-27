@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="data/icons/hicolor/scalable/apps/io.github.tunix.valhalla.svg" width="192" alt="Valhalla logo"/>
+</p>
+
 # Valhalla
 
 A minimal wallpaper application for Linux desktops, inspired by

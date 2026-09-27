@@ -73,7 +73,10 @@ impl Window {
         settings: &gio::Settings,
         trig: mpsc::UnboundedSender<Trigger>,
     ) -> Self {
-        let window: Window = glib::Object::builder().property("application", app).build();
+        let window: Window = glib::Object::builder()
+            .property("application", app)
+            .property("icon-name", "io.github.tunix.valhalla")
+            .build();
         let imp = window.imp();
         let _ = imp.settings.set(settings.clone());
         let _ = imp.trig.set(trig);

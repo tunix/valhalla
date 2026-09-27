@@ -27,6 +27,11 @@ fn main() {
     println!("cargo:rerun-if-changed=data/{schema}");
 
     // 3. Generate and compile the GResource bundle.
+    let icon_dir = manifest.join("data/icons/hicolor/scalable/apps");
+    println!(
+        "cargo:rerun-if-changed={}",
+        icon_dir.join("io.github.tunix.valhalla.svg").display()
+    );
     let mut xml = String::from(
         r#"<?xml version="1.0" encoding="UTF-8"?><gresources><gresource prefix="/io/github/tunix/valhalla">"#,
     );
@@ -34,11 +39,18 @@ fn main() {
     xml.push_str(&format!(
         r#"<file compressed="true" alias="{schema}">{schema}</file>"#
     ));
+    xml.push_str(
+        r#"<file compressed="true" alias="icons/hicolor/scalable/apps/io.github.tunix.valhalla.svg">io.github.tunix.valhalla.svg</file>"#,
+    );
     xml.push_str("</gresource></gresources>");
     let gxml = out.join("valhalla.gresources.xml");
     fs::write(&gxml, xml).expect("write gresource xml");
 
-    glib_build_tools::compile_resources(&[out], gxml.to_str().unwrap(), "valhalla.gresource");
+    glib_build_tools::compile_resources(
+        &[out, icon_dir],
+        gxml.to_str().unwrap(),
+        "valhalla.gresource",
+    );
 
     // 5. Install the schema into the user schema dir so dev runs (outside
     //    Flatpak) find it via dconf.

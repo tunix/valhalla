@@ -14,6 +14,7 @@ pub fn run() {
 
     app.connect_activate(|app| {
         load_css();
+        register_icon_theme();
 
         if let Some(existing) = app.active_window() {
             existing.present();
@@ -66,6 +67,12 @@ pub fn run() {
     app.add_action(&quit);
 
     app.run();
+}
+
+fn register_icon_theme() {
+    if let Some(display) = gdk::Display::default() {
+        gtk::IconTheme::for_display(&display).add_resource_path("/io/github/tunix/valhalla/icons");
+    }
 }
 
 fn load_css() {
