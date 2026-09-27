@@ -12,6 +12,13 @@ Valhalla picks wallpapers from online sources and — most importantly — alway
 matches them to your desktop's light/dark preference, so dark mode never gets a
 blinding white wallpaper.
 
+## Screenshots
+
+<p align="center">
+  <img src="docs/screenshots/dark.png" width="380" alt="Valhalla in dark theme with a dark wallpaper"/>
+  <img src="docs/screenshots/light.png" width="380" alt="Valhalla in light theme with a light wallpaper"/>
+</p>
+
 ## Features
 
 - **Theme-aware selection**: wallpapers are analyzed (average brightness) and
