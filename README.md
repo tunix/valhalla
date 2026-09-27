@@ -66,4 +66,4 @@ API keys in the Secret Service (GNOME Keyring).
 
 ## License
 
-GPL-3.0-or-later
+GPL-3.0

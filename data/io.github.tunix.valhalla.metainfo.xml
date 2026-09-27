@@ -2,7 +2,7 @@
 <component type="desktop-application">
   <id>io.github.tunix.valhalla</id>
   <metadata_license>CC0-1.0</metadata_license>
-  <project_license>GPL-3.0-or-later</project_license>
+  <project_license>GPL-3.0</project_license>
   <name>Valhalla</name>
   <summary>Theme-aware wallpaper switcher</summary>
   <description>

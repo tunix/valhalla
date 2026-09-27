@@ -148,7 +148,7 @@ impl Window {
                 dialog.set_website("https://github.com/tunix/valhalla");
                 dialog.set_developer_name("Tunix");
                 dialog.set_comments("Theme-aware wallpaper switcher for Linux desktops");
-                dialog.set_license_type(gtk::License::Gpl30);
+                dialog.set_license_type(gtk::License::Gpl30Only);
                 dialog.present(Some(&win));
             }
         });
