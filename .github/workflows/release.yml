@@ -6,6 +6,12 @@ on:
   # The artifacts job only runs when a release is actually created.
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re)attach artifacts to"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -18,6 +24,8 @@ jobs:
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
+    # Nothing to do on a manual dispatch; skip it to save a run.
+    if: github.event_name != 'workflow_dispatch'
     steps:
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         id: release
@@ -25,20 +33,24 @@ jobs:
           release-type: rust
 
   artifacts:
+    name: Package release artifacts (${{ matrix.arch }})
     needs: release-please
-    if: needs.release-please.outputs.release_created == 'true'
+    if: >-
+      always() &&
+      (needs.release-please.outputs.release_created == 'true' ||
+       github.event_name == 'workflow_dispatch')
     strategy:
+      fail-fast: false
       matrix:
         include:
           - arch: x86_64
             runner: ubuntu-latest
           - arch: aarch64
             runner: ubuntu-24.04-arm
-    name: Package release artifacts (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     container: fedora:latest
     env:
-      TAG: ${{ needs.release-please.outputs.tag_name }}
+      TAG: ${{ inputs.tag || needs.release-please.outputs.tag_name }}
       ARCH: ${{ matrix.arch }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -67,8 +79,32 @@ jobs:
           install -D -m 0644 data/valhalla.service "valhalla-${TAG}/data/valhalla.service"
           tar -czf "valhalla-${TAG}-${ARCH}.tar.gz" "valhalla-${TAG}"
 
+      # The release is created as a draft by release-please (see
+      # .github/release-please-config.json): uploads must happen before
+      # publication because immutable releases reject late asset uploads.
       - name: Upload release artifacts
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
-          tag_name: ${{ needs.release-please.outputs.tag_name }}
+          tag_name: ${{ env.TAG }}
           files: valhalla-*-${{ matrix.arch }}.tar.gz
+
+  publish:
+    name: Publish release
+    needs: [release-please, artifacts]
+    if: always() && needs.artifacts.result == 'success'
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ inputs.tag || needs.release-please.outputs.tag_name }}
+    steps:
+      - name: Flip the draft release to published
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          RELEASE_ID=$(curl -sSf -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" \
+            | python3 -c "import json, sys; print(json.load(sys.stdin)['id'])")
+          curl -sSf -X PATCH \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
+            -d '{"draft": false}' > /dev/null
+          echo "Release ${TAG} published"
