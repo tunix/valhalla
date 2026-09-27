@@ -122,6 +122,15 @@ jobs:
           - arch: aarch64
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
+    # The runner image no longer ships flatpak-builder (v0.4.0's release run
+    # failed with "xvfb-run: flatpak-builder: not found", run 36352695032).
+    # This image owns the whole toolchain: flatpak, flatpak-builder and the
+    # preconfigured flathub remote. It is multi-arch (amd64 + arm64), so the
+    # arm64 job runs its native variant; --privileged is required for
+    # flatpak's sandboxing during builds.
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-49
+      options: --privileged
     env:
       TAG: ${{ inputs.tag || needs.release-please.outputs.tag_name }}
     steps:
