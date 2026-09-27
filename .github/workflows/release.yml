@@ -97,7 +97,22 @@ jobs:
     env:
       TAG: ${{ inputs.tag || needs.release-please.outputs.tag_name }}
     steps:
+      # gh release edit always sends tag_name in the PATCH, which immutable
+      # releases reject; publish with a minimal PATCH body instead.
       - name: Flip the draft release to published
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release edit "$TAG" --draft=false --repo "$GITHUB_REPOSITORY"
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          RELEASE_ID=$(curl -sSf -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases?per_page=20" \
+            | jq -r '[.[] | select(.draft)][0].id // empty')
+          if [ -z "${RELEASE_ID}" ]; then
+            RELEASE_ID=$(curl -sSf -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" \
+              | jq -r '.id')
+          fi
+          curl -sSf -X PATCH \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
+            -d '{"draft": false}' > /dev/null
+          echo "Release ${TAG} published"
