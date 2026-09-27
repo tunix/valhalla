@@ -54,6 +54,41 @@ sudo dnf install -y rust cargo rustfmt clippy gcc pkgconf-pkg-config \
     gtk4-devel libadwaita-devel libsecret-devel glib2-devel blueprint-compiler git
 ```
 
+## Flatpak
+
+Every release ships ready-to-install `.flatpak` bundles (x86_64 and
+aarch64), built in CI from [`flatpak/io.github.tunix.valhalla.json`](flatpak/io.github.tunix.valhalla.json)
+on the GNOME 49 runtime. Grab one from the
+[releases page](https://github.com/tunix/valhalla/releases) and install:
+
+```sh
+flatpak install ./valhalla-<tag>-x86_64.flatpak
+```
+
+The bundle references its runtime, so the GNOME 49 platform is pulled
+from Flathub automatically on first install.
+
+To build the bundle locally instead:
+
+```sh
+# regenerate the vendored-crate source list from Cargo.lock
+python3 flatpak/flatpak-cargo-generator.py Cargo.lock \
+    -o flatpak/generated-sources.json
+
+# build (offers to install the GNOME 49 Sdk and the rust-stable
+# extension on first run)
+flatpak-builder --force-clean --user --default-branch=stable \
+    --repo=flatpak-repo flatpak-build flatpak/io.github.tunix.valhalla.json
+
+# optional: single-file bundle to share or install
+flatpak build-bundle \
+    --runtime-repo=https://flathub.org/repo/flathub.flatpakrepo \
+    flatpak-repo valhalla.flatpak io.github.tunix.valhalla stable
+flatpak install ./valhalla.flatpak
+```
+
+A Flathub submission is planned on top of the same manifest.
+
 ## Running
 
 ```sh
