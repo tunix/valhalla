@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.1](https://github.com/tunix/valhalla/compare/v0.5.0...v0.5.1) (2026-09-27)
+
+
+### Bug Fixes
+
+* **ui:** About developer name; unfreeze the login-at-startup toggle ([#26](https://github.com/tunix/valhalla/issues/26)) ([6bcca47](https://github.com/tunix/valhalla/commit/6bcca478aed338cd576640943daad109118eb704))
+* **ui:** show the developer's name in About; freeze-proof the login toggle ([6bcca47](https://github.com/tunix/valhalla/commit/6bcca478aed338cd576640943daad109118eb704))
+
 ## [0.5.0](https://github.com/tunix/valhalla/compare/v0.4.0...v0.5.0) (2026-09-27)
 
 
