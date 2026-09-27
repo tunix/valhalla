@@ -29,10 +29,12 @@ jobs:
     steps:
       # NOTE: deliberately no `release-type` input here. Setting it switches
       # the action to its Manifest.fromConfig() code path, which ignores
-      # .github/release-please-config.json entirely — including "draft": true —
-      # so the release is created PUBLISHED (immutable) and the later artifact
-      # uploads fail with "Cannot upload asset ... to an immutable release".
-      # Without the input the action reads the config file itself.
+      # release-please-config.json (repo root) entirely — including
+      # "draft": true — so the release is created PUBLISHED (immutable) and
+      # the later artifact uploads fail with "Cannot upload asset ... to an
+      # immutable release". Without the input the action reads the config
+      # file itself (DEFAULT_CONFIG_FILE = 'release-please-config.json',
+      # i.e. at the repo ROOT, not under .github/).
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         id: release
 
@@ -84,7 +86,7 @@ jobs:
           tar -czf "valhalla-${TAG}-${ARCH}.tar.gz" "valhalla-${TAG}"
 
       # The release is created as a draft by release-please (see
-      # .github/release-please-config.json): uploads must happen before
+      # release-please-config.json at the repo root): uploads must happen before
       # publication because immutable releases reject late asset uploads.
       - name: Upload release artifacts
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
