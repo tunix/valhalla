@@ -46,6 +46,12 @@ jobs:
       # immutable release". Without the input the action reads the config
       # file itself (DEFAULT_CONFIG_FILE = 'release-please-config.json',
       # i.e. at the repo ROOT, not under .github/).
+      # force-tag-creation (set in release-please-config.json): draft releases
+      # carry no tag ref, so without it release-please's version discovery
+      # cannot see the pending draft — the next run then re-opened the SAME
+      # commits as a new version PR (0.5.0 copying 0.4.0, #22). With it, the
+      # tag ref exists at release-PR merge time, discovery finds it, and
+      # re-runs while the draft waits for artifacts are a no-op.
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         id: release
 
