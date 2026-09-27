@@ -103,16 +103,40 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          RELEASE_ID=$(curl -sSf -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases?per_page=20" \
-            | jq -r '[.[] | select(.draft)][0].id // empty')
+          AUTH="Authorization: Bearer ${GITHUB_TOKEN}"
+          BASE="https://api.github.com/repos/${GITHUB_REPOSITORY}"
+
+          # Prefer the draft matching this tag; fall back to the published
+          # release by tag (a draft does not create the tag ref, so a 404 on
+          # the tag endpoint does NOT mean the release is missing).
+          RELEASE_ID=$(curl -sSf -H "$AUTH" \
+            "${BASE}/releases?per_page=100" \
+            | jq -r --arg tag "${TAG}" '[.[] | select(.draft and .tag_name == $tag)][0].id // empty')
+
           if [ -z "${RELEASE_ID}" ]; then
-            RELEASE_ID=$(curl -sSf -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-              "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" \
-              | jq -r '.id')
+            # No matching draft: either already published or never created.
+            HTTP=$(curl -sS -o /tmp/rel.json -w '%{http_code}' -H "$AUTH" \
+              "${BASE}/releases/tags/${TAG}")
+            if [ "${HTTP}" = "200" ] && [ "$(jq -r '.draft' /tmp/rel.json)" = "false" ]; then
+              echo "Release ${TAG} is already published - nothing to do."
+              exit 0
+            fi
+            if [ "${HTTP}" = "404" ]; then
+              echo "WARNING: no draft and no published release for ${TAG} - nothing to publish."
+              exit 0
+            fi
+            echo "ERROR: unexpected HTTP ${HTTP} looking up ${TAG}:" >&2
+            cat /tmp/rel.json >&2
+            exit 1
           fi
-          curl -sSf -X PATCH \
-            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
-            -d '{"draft": false}' > /dev/null
+
+          HTTP=$(curl -sS -o /tmp/pub.json -w '%{http_code}' -X PATCH \
+            -H "$AUTH" \
+            "${BASE}/releases/${RELEASE_ID}" \
+            -d '{"draft": false}')
+          if [ "${HTTP}" != "200" ]; then
+            echo "ERROR: PATCH ${RELEASE_ID} failed with HTTP ${HTTP}:" >&2
+            cat /tmp/pub.json >&2
+            exit 1
+          fi
           echo "Release ${TAG} published"
