@@ -154,7 +154,7 @@ jobs:
             -o flatpak/generated-sources.json
 
       - name: Build flatpak bundle
-        uses: flathub-infra/flatpak-github-actions/flatpak-builder@933e9e8ca36e85046ebca8e211f0785c6becac40 # master @ 933e9e8
+        uses: flatpak/flatpak-github-actions/flatpak-builder@79327416609af08178ad73b352877e51450790b3 # master @ 7932741 (node24)
         with:
           bundle: valhalla-${{ env.TAG }}-${{ matrix.arch }}.flatpak
           manifest-path: flatpak/io.github.tunix.valhalla.json
