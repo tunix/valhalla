@@ -172,10 +172,117 @@ jobs:
           draft: true
           files: valhalla-*-${{ matrix.arch }}.flatpak
 
+  appimage:
+    name: AppImage (${{ matrix.arch }})
+    needs: release-please
+    if: >-
+      always() &&
+      (needs.release-please.outputs.release_created == 'true' ||
+       github.event_name == 'workflow_dispatch')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    container: ubuntu:24.04
+    env:
+      TAG: ${{ inputs.tag || needs.release-please.outputs.tag_name }}
+      ARCH: ${{ matrix.arch }}
+      APPIMAGE_EXTRACT_AND_RUN: "1" # appimagetool runs on non-FUSE runners
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install toolchain
+        run: |
+          apt-get update -q
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            rustc cargo gcc pkg-config libgtk-4-dev libadwaita-1-dev libsecret-1-dev \
+            libglib2.0-dev blueprint-compiler git curl file desktop-file-utils \
+            libfuse2 zsync ca-certificates
+
+      - name: Cache cargo artifacts
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            /root/.cargo/registry
+            /root/.cargo/git
+          key: ubuntu-cargo-${{ matrix.arch }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ubuntu-cargo-${{ matrix.arch }}-
+
+      - name: Build release binary
+        run: cargo build --release --locked
+
+      - name: Assemble AppDir
+        run: |
+          set -eu
+          APPDIR=AppDir
+          install -D -m 0755 target/release/valhalla "$APPDIR/usr/bin/valhalla"
+          install -D -m 0644 data/io.github.tunix.valhalla.desktop.in \
+            "$APPDIR/usr/share/applications/io.github.tunix.valhalla.desktop"
+          install -D -m 0644 data/io.github.tunix.valhalla.metainfo.xml \
+            "$APPDIR/usr/share/metainfo/io.github.tunix.valhalla.metainfo.xml"
+          install -D -m 0644 data/io.github.tunix.valhalla.gschema.xml \
+            "$APPDIR/usr/share/glib-2.0/schemas/io.github.tunix.valhalla.gschema.xml"
+          glib-compile-schemas "$APPDIR/usr/share/glib-2.0/schemas"
+          install -D -m 0644 data/icons/hicolor/scalable/apps/io.github.tunix.valhalla.svg \
+            "$APPDIR/usr/share/icons/hicolor/scalable/apps/io.github.tunix.valhalla.svg"
+          install -D -m 0644 data/icons/hicolor/512x512/apps/io.github.tunix.valhalla.png \
+            "$APPDIR/usr/share/icons/hicolor/512x512/apps/io.github.tunix.valhalla.png"
+          cp "$APPDIR/usr/share/icons/hicolor/512x512/apps/io.github.tunix.valhalla.png" \
+             "$APPDIR/io.github.tunix.valhalla.png"
+          # Top-level desktop file required by appimagetool (with the
+          # Exec= pointing at the AppDir-relative binary).
+          sed 's/^Exec=valhalla$/Exec=AppRun/' \
+            "$APPDIR/usr/share/applications/io.github.tunix.valhalla.desktop" \
+            > "$APPDIR/io.github.tunix.valhalla.desktop"
+          cat > "$APPDIR/AppRun" <<'EOF'
+          #!/bin/sh
+          HERE=$(dirname "$(readlink -f "$0")")
+          export GSETTINGS_SCHEMA_DIR="$HERE/usr/share/glib-2.0/schemas"
+          exec "$HERE/usr/bin/valhalla" "$@"
+          EOF
+          chmod 0755 "$APPDIR/AppRun"
+
+      - name: Download appimagetool
+        run: |
+          set -eu
+          ARCH=${{ matrix.arch }}
+          case "$ARCH" in x86_64) A=x86_64;; aarch64) A=aarch64;; esac
+          curl -sSfL -o appimagetool \
+            "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-$A.AppImage"
+          chmod 0755 appimagetool
+
+      - name: Build AppImage
+        run: |
+          set -eu
+          VERSION="${TAG#v}"
+          ./appimagetool --appimage-extract-and-run AppDir \
+            "valhalla-${VERSION}-${ARCH}.AppImage" \
+            -u "gh-releases-zsync|tunix|valhalla|latest|valhalla-*-${ARCH}.AppImage.zsync"
+
+      - name: Validate AppImage
+        run: |
+          set -eu
+          ./"valhalla-${VERSION}-${ARCH}.AppImage" --appimage-extract >/dev/null
+          test -f squashfs-root/usr/bin/valhalla
+
+      - name: Upload release artifacts
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          tag_name: ${{ env.TAG }}
+          draft: true
+          files: |
+            valhalla-*-${{ matrix.arch }}.AppImage
+            valhalla-*-${{ matrix.arch }}.AppImage.zsync
+
   publish:
     name: Publish release
-    needs: [release-please, artifacts, flatpak]
-    if: always() && needs.artifacts.result == 'success' && needs.flatpak.result == 'success'
+    needs: [release-please, artifacts, flatpak, appimage]
+    if: always() && needs.artifacts.result == 'success' && needs.flatpak.result == 'success' && needs.appimage.result == 'success'
     runs-on: ubuntu-latest
     env:
       TAG: ${{ inputs.tag || needs.release-please.outputs.tag_name }}
@@ -223,6 +330,25 @@ jobs:
             exit 1
           fi
           echo "Release ${TAG} published"
+
+  notify-flatpak-repo:
+    # Tell tunix/flatpak to rebuild this app into the self-hosted OSTree repo
+    # (tunix.github.io/flatpak). Runs after publish so the tag is final.
+    name: Trigger tunix/flatpak update
+    needs: publish
+    if: always() && needs.publish.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: peter-evans/repository-dispatch@ff45666b9427631e3450c54a1bc964fd290def5a # v3.0.0
+        with:
+          token: ${{ secrets.FLATPAK_REPO_TOKEN }}
+          repository: tunix/flatpak
+          event-type: app-released
+          client-payload: |
+            {
+              "app_id": "io.github.tunix.valhalla",
+              "tag": "${{ inputs.tag || needs.release-please.outputs.tag_name }}"
+            }
 
   guard:
     # release-please computes the next release from the last PUBLISHED
