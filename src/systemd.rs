@@ -66,9 +66,9 @@ fn systemctl(args: &[&str]) -> Result<(), String> {
     }
 }
 
-/// Whether the user manager reports the unit as enabled. Kept for the
-/// direct-query path used by tests; the UI uses is_enabled()'s bus-tolerant
-/// version below.
+/// Whether the user manager reports the unit as enabled. Test-only direct
+/// query; the UI uses the bus-tolerant is_enabled() below.
+#[cfg(test)]
 fn is_enabled_direct() -> bool {
     let Ok(output) = std::process::Command::new("systemctl")
         .args(["--user", "is-enabled", UNIT_NAME])
