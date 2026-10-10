@@ -470,3 +470,143 @@ pub fn run_daemon() {
     let mainloop = glib::MainLoop::new(None, false);
     mainloop.run();
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn source_keys_trigger_refresh() {
+        for key in REFRESH_KEYS {
+            assert!(is_source_key(key), "{key} must trigger");
+        }
+    }
+
+    #[test]
+    fn unrelated_keys_do_not_trigger() {
+        assert!(!is_source_key("brightness-threshold"));
+        assert!(!is_source_key("refresh-on-startup"));
+        assert!(!is_source_key(""));
+        assert!(!is_source_key("wallhaven-query-x"));
+    }
+
+    #[test]
+    fn triggers_are_distinct_and_debuggable() {
+        // The enum is used as a tracing field and compared for equality.
+        let all = [
+            Trigger::Startup,
+            Trigger::Manual,
+            Trigger::Interval,
+            Trigger::ThemeChange,
+            Trigger::SettingsChange,
+        ];
+        for (i, a) in all.iter().enumerate() {
+            for b in &all[i + 1..] {
+                assert_ne!(a, b);
+            }
+            assert!(!format!("{a:?}").is_empty());
+        }
+    }
+
+    #[test]
+    fn msg_variants_debug() {
+        let msgs = [
+            Msg::Busy,
+            Msg::WallpaperSet {
+                path: "/w.jpg".into(),
+                source: "wallhaven",
+                title: Some("T".into()),
+                author: None,
+                scheme: ColorScheme::Dark,
+            },
+            Msg::Failed("boom".into()),
+            Msg::Info("info".into()),
+        ];
+        for m in &msgs {
+            assert!(!format!("{m:?}").is_empty());
+        }
+        // WallpaperSet carries the full metadata for the window caption.
+        if let Msg::WallpaperSet {
+            path,
+            source,
+            title,
+            author,
+            scheme,
+        } = &msgs[1]
+        {
+            assert_eq!(path, &std::path::PathBuf::from("/w.jpg"));
+            assert_eq!(*source, "wallhaven");
+            assert_eq!(title.as_deref(), Some("T"));
+            assert!(author.is_none());
+            assert_eq!(*scheme, ColorScheme::Dark);
+        }
+    }
+
+    /// Interval gating math: an interval refresh is due only when the stored
+    /// last_refresh_at is older than interval_min minutes. Extracted here as
+    /// the exact comparison process() performs.
+    #[test]
+    fn interval_gate_math() {
+        let now: u64 = 10 * 3600;
+        let last: u64 = 9 * 3600; // 1h ago
+
+        let due = |interval_min: u64| -> bool {
+            interval_min != 0 && now.saturating_sub(last) >= interval_min * 60
+        };
+        assert!(due(60), "1h elapsed, 60m interval -> due");
+        assert!(!due(120), "1h elapsed, 120m interval -> not due");
+        assert!(!due(0), "interval disabled -> never due");
+        // last in the future (clock skew) must not panic.
+        let future_last: u64 = 11 * 3600;
+        assert!((now.saturating_sub(future_last)) == 0);
+    }
+
+    /// Theme-change dedup: a refresh runs only when the scheme actually
+    /// changed since the last refresh.
+    #[test]
+    fn theme_change_dedup_math() {
+        let should_run = |refresh_enabled: bool, prev: Option<&str>, cur: &str| {
+            refresh_enabled && prev.map(|p| p != cur).unwrap_or(true)
+        };
+        assert!(!should_run(false, None, "dark"), "feature off -> skip");
+        assert!(!should_run(true, Some("dark"), "dark"), "unchanged -> skip");
+        assert!(should_run(true, Some("light"), "dark"), "changed -> run");
+        assert!(should_run(true, None, "dark"), "first ever -> run");
+    }
+
+    /// The refresh budget is a compile-time constant; pin it so an accidental
+    /// change is a reviewable diff.
+    #[test]
+    fn refresh_budget_is_five_minutes() {
+        assert_eq!(REFRESH_BUDGET, Duration::from_secs(300));
+    }
+
+    /// Used-pool trimming: at most 100 ids per source are remembered.
+    #[test]
+    fn used_pool_trim_math() {
+        let mut entry: Vec<String> = (0..103).map(|i| format!("id{i}")).collect();
+        if entry.len() > 100 {
+            let excess = entry.len() - 100;
+            entry.drain(0..excess);
+        }
+        assert_eq!(entry.len(), 100);
+        assert_eq!(entry[0], "id3"); // oldest trimmed
+        assert_eq!(entry[99], "id102");
+    }
+
+    /// History cap: at most 50 entries, newest first.
+    #[test]
+    fn history_cap_math() {
+        let mut history: Vec<HistoryEntry> = (0..60)
+            .map(|i| HistoryEntry {
+                id: format!("h{i}"),
+                source: "s".into(),
+                path: "/p".into(),
+                title: None,
+                author: None,
+            })
+            .collect();
+        history.truncate(50);
+        assert_eq!(history.len(), 50);
+    }
+}

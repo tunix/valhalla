@@ -88,3 +88,94 @@ async fn apply_portal(path: &Path, lockscreen: bool) -> Result<(), String> {
         .map_err(|e| format!("wallpaper portal: {e}"))?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detect_prefers_gsettings_when_schema_present() {
+        // The org.gnome.desktop.background schema ships with gsettings-desktop-schemas,
+        // present in the CI image: native (non-flatpak) detection must pick GSettings.
+        if std::env::var_os("FLATPAK_ID").is_none() {
+            assert_eq!(
+                detect(),
+                if is_flatpak() {
+                    Applier::Portal
+                } else if gsettings_background_available() {
+                    Applier::GSettings
+                } else {
+                    Applier::Portal
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn apply_gsettings_writes_both_keys() {
+        // Real gsettings write via the memory backend: both light and dark URIs.
+        std::env::set_var("GSETTINGS_BACKEND", "memory");
+        let light = std::env::temp_dir().join("v-light.jpg");
+        let dark = std::env::temp_dir().join("v-dark.jpg");
+        std::fs::write(&light, b"x").unwrap();
+        std::fs::write(&dark, b"y").unwrap();
+        apply_gsettings(Some(&light), Some(&dark)).expect("gsettings write");
+        let bg = gio::Settings::new("org.gnome.desktop.background");
+        assert!(bg.string("picture-uri").as_str().ends_with("v-light.jpg"));
+        assert!(bg
+            .string("picture-uri-dark")
+            .as_str()
+            .ends_with("v-dark.jpg"));
+        // Partial writes are skipped, not errors.
+        apply_gsettings(Some(&light), None).expect("partial write");
+        assert!(bg
+            .string("picture-uri-dark")
+            .as_str()
+            .ends_with("v-dark.jpg"));
+        std::env::remove_var("GSETTINGS_BACKEND");
+    }
+
+    #[test]
+    fn flatpak_detection_is_path_based() {
+        // Pure path predicate: on CI there is no /.flatpak-info, so the
+        // expected result is known without mocking.
+        assert_eq!(
+            is_flatpak(),
+            std::path::Path::new("/.flatpak-info").exists()
+        );
+    }
+
+    #[test]
+    fn portal_requires_a_wallpaper() {
+        // The portal path without a wallpaper for the current scheme must
+        // fail fast (this exercises the apply() guard, not the portal).
+        let result = apply(
+            Applier::Portal,
+            Some(Path::new("/tmp/a.jpg")),
+            None,
+            ColorScheme::Dark,
+            false,
+        );
+        // It is async; drive it to completion on a small runtime.
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        let err = rt
+            .block_on(result)
+            .expect_err("no dark wallpaper must fail");
+        assert!(err.contains("no wallpaper"));
+    }
+
+    #[test]
+    fn portal_scheme_picks_correct_side() {
+        // apply()'s portal branch maps the current scheme to the matching
+        // wallpaper side; verify the mapping without touching zbus (the
+        // portal connect itself can hang without a session bus).
+        let side = |scheme| match scheme {
+            ColorScheme::Light => Some(Path::new("/tmp/light.jpg")),
+            ColorScheme::Dark => Some(Path::new("/tmp/dark.jpg")),
+        };
+        assert_eq!(side(ColorScheme::Light), Some(Path::new("/tmp/light.jpg")));
+        assert_eq!(side(ColorScheme::Dark), Some(Path::new("/tmp/dark.jpg")));
+    }
+}

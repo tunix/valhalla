@@ -42,3 +42,24 @@ pub fn clear(source: &str) {
     let attributes: HashMap<&str, &str> = HashMap::from([("source", source)]);
     let _ = password_clear_sync(Some(&schema()), attributes, gio::Cancellable::NONE);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The schema is built once per call; verify its shape via a lookup that
+    /// the Secret Service accepts structurally. In CI there is no keyring
+    /// daemon, so get() must return None gracefully rather than panicking.
+    #[test]
+    fn schema_builds_and_get_degrades_gracefully() {
+        let _ = schema(); // must not panic
+                          // No Secret Service in CI: lookup fails and collapses to None.
+        assert_eq!(get("wallhaven"), None);
+        assert_eq!(get("unsplash"), None);
+    }
+
+    #[test]
+    fn get_never_panics_on_unknown_source() {
+        assert_eq!(get("nonexistent-source"), None);
+    }
+}

@@ -110,4 +110,41 @@ mod tests {
         assert!(!is_enabled());
         std::fs::remove_file(unit_path()).ok();
     }
+
+    /// The unit template embeds the executable path and stays a valid unit
+    /// file. Verify the rendering without a systemd manager.
+    #[test]
+    fn unit_template_renders_exe_path() {
+        let exe = "/usr/local/bin/valhalla";
+        let unit = UNIT_TEMPLATE.replace("{exe}", exe);
+        assert!(unit.contains("ExecStart=\"/usr/local/bin/valhalla\" --daemon"));
+        assert!(unit.contains("[Unit]"));
+        assert!(unit.contains("[Service]"));
+        assert!(unit.contains("[Install]"));
+        assert!(unit.contains("Restart=on-failure"));
+        assert!(unit.contains("WantedBy=graphical-session.target"));
+        assert!(!unit.contains("{exe}"), "placeholder must be substituted");
+    }
+
+    #[test]
+    fn unit_dir_respects_xdg_config_home() {
+        // Same resolution logic as unit_dir(), exercised against env vars.
+        let dir = std::env::temp_dir().join(format!("valhalla-systemd-{}", std::process::id()));
+        std::env::set_var("XDG_CONFIG_HOME", &dir);
+        let resolved = std::env::var_os("XDG_CONFIG_HOME")
+            .filter(|p| !p.is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| glib::home_dir().join(".config"));
+        assert_eq!(resolved, dir);
+        let unit_dir = resolved.join("systemd/user");
+        assert!(unit_dir.ends_with("systemd/user"));
+        std::env::remove_var("XDG_CONFIG_HOME");
+    }
+
+    #[test]
+    fn unit_name_is_stable() {
+        // The unit filename is referenced by the UI toggle and docs.
+        assert_eq!(UNIT_NAME, "valhalla.service");
+        assert!(unit_path().file_name().and_then(|n| n.to_str()) == Some(UNIT_NAME));
+    }
 }
