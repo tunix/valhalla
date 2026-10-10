@@ -53,7 +53,7 @@ mod tests {
     #[test]
     fn schema_builds_and_get_degrades_gracefully() {
         let _ = schema(); // must not panic
-        // No Secret Service in CI: lookup fails and collapses to None.
+                          // No Secret Service in CI: lookup fails and collapses to None.
         assert_eq!(get("wallhaven"), None);
         assert_eq!(get("unsplash"), None);
     }

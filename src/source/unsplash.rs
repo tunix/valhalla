@@ -162,7 +162,10 @@ mod tests {
         assert_eq!(p.id, "ph1");
         assert_eq!(p.urls.full.as_deref(), Some("https://u/full"));
         assert_eq!(p.user.and_then(|u| u.name).as_deref(), Some("Ada"));
-        assert_eq!(p.links.and_then(|l| l.html).as_deref(), Some("https://unsplash.com/ph1"));
+        assert_eq!(
+            p.links.and_then(|l| l.html).as_deref(),
+            Some("https://unsplash.com/ph1")
+        );
     }
 
     #[test]
@@ -180,8 +183,7 @@ mod tests {
         // Mirrors the candidates() mapping: no full URL -> raw + params.
         let raw = "https://u/raw?ixid=1";
         let full: Option<String> = None;
-        let image_url =
-            full.unwrap_or_else(|| format!("{raw}&fm=jpg&w=3840&q=85&fit=max"));
+        let image_url = full.unwrap_or_else(|| format!("{raw}&fm=jpg&w=3840&q=85&fit=max"));
         assert!(image_url.starts_with(raw));
         assert!(image_url.contains("ixid=1")); // ixid preserved per API guidelines
         assert!(image_url.contains("fm=jpg"));
@@ -189,7 +191,9 @@ mod tests {
 
     #[tokio::test]
     async fn local_api_maps_photos() {
-        let port_guard = StubBaseGuard { var: "VALHALLA_UNSPLASH_URL" };
+        let port_guard = StubBaseGuard {
+            var: "VALHALLA_UNSPLASH_URL",
+        };
         let payload = r#"[{
             "id": "u1",
             "urls": {"raw": "https://u/raw?ixid=9", "full": "https://u/full", "small": "https://u/s"},
@@ -235,7 +239,9 @@ mod tests {
 
     #[tokio::test]
     async fn unauthorized_key_is_reported() {
-        let port_guard = StubBaseGuard { var: "VALHALLA_UNSPLASH_URL" };
+        let port_guard = StubBaseGuard {
+            var: "VALHALLA_UNSPLASH_URL",
+        };
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         port_guard.set(port);
@@ -248,7 +254,9 @@ mod tests {
             let mut stream = stream;
             use std::io::Write as _;
             stream
-                .write_all(b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                .write_all(
+                    b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                )
                 .unwrap();
         });
 

@@ -104,7 +104,13 @@ mod tests {
         if std::env::var_os("FLATPAK_ID").is_none() {
             assert_eq!(
                 detect(),
-                if is_flatpak() { Applier::Portal } else if gsettings_background_available() { Applier::GSettings } else { Applier::Portal }
+                if is_flatpak() {
+                    Applier::Portal
+                } else if gsettings_background_available() {
+                    Applier::GSettings
+                } else {
+                    Applier::Portal
+                }
             );
         }
     }
@@ -120,10 +126,16 @@ mod tests {
         apply_gsettings(Some(&light), Some(&dark)).expect("gsettings write");
         let bg = gio::Settings::new("org.gnome.desktop.background");
         assert!(bg.string("picture-uri").as_str().ends_with("v-light.jpg"));
-        assert!(bg.string("picture-uri-dark").as_str().ends_with("v-dark.jpg"));
+        assert!(bg
+            .string("picture-uri-dark")
+            .as_str()
+            .ends_with("v-dark.jpg"));
         // Partial writes are skipped, not errors.
         apply_gsettings(Some(&light), None).expect("partial write");
-        assert!(bg.string("picture-uri-dark").as_str().ends_with("v-dark.jpg"));
+        assert!(bg
+            .string("picture-uri-dark")
+            .as_str()
+            .ends_with("v-dark.jpg"));
         std::env::remove_var("GSETTINGS_BACKEND");
     }
 
@@ -131,14 +143,23 @@ mod tests {
     fn flatpak_detection_is_path_based() {
         // Pure path predicate: on CI there is no /.flatpak-info, so the
         // expected result is known without mocking.
-        assert_eq!(is_flatpak(), std::path::Path::new("/.flatpak-info").exists());
+        assert_eq!(
+            is_flatpak(),
+            std::path::Path::new("/.flatpak-info").exists()
+        );
     }
 
     #[test]
     fn portal_requires_a_wallpaper() {
         // The portal path without a wallpaper for the current scheme must
         // fail fast (this exercises the apply() guard, not the portal).
-        let result = apply(Applier::Portal, Some(Path::new("/tmp/a.jpg")), None, ColorScheme::Dark, false);
+        let result = apply(
+            Applier::Portal,
+            Some(Path::new("/tmp/a.jpg")),
+            None,
+            ColorScheme::Dark,
+            false,
+        );
         // It is async; drive it to completion on a small runtime.
         let rt = tokio::runtime::Builder::new_current_thread()
             .build()
@@ -161,5 +182,4 @@ mod tests {
         assert_eq!(side(ColorScheme::Light), Some(Path::new("/tmp/light.jpg")));
         assert_eq!(side(ColorScheme::Dark), Some(Path::new("/tmp/dark.jpg")));
     }
-
 }

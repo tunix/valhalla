@@ -60,8 +60,14 @@ mod tests {
     #[test]
     fn serde_roundtrip() {
         // The scheme is persisted in state.json — serde names are load-bearing.
-        assert_eq!(serde_json::to_string(&ColorScheme::Light).unwrap(), "\"light\"");
-        assert_eq!(serde_json::to_string(&ColorScheme::Dark).unwrap(), "\"dark\"");
+        assert_eq!(
+            serde_json::to_string(&ColorScheme::Light).unwrap(),
+            "\"light\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ColorScheme::Dark).unwrap(),
+            "\"dark\""
+        );
         let dark: ColorScheme = serde_json::from_str("\"dark\"").unwrap();
         assert_eq!(dark, ColorScheme::Dark);
         assert!(serde_json::from_str::<ColorScheme>("\"blue\"").is_err());

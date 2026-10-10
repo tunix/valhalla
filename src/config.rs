@@ -101,10 +101,34 @@ mod tests {
 
     #[test]
     fn geometry_parses_valid_strings() {
-        assert_eq!(parse_geometry("1920x1080"), Some(ScreenInfo { width: 1920, height: 1080 }));
-        assert_eq!(parse_geometry("3840x2160"), Some(ScreenInfo { width: 3840, height: 2160 }));
-        assert_eq!(parse_geometry(" 800x 600 "), Some(ScreenInfo { width: 800, height: 600 }));
-        assert_eq!(parse_geometry("1080x1920"), Some(ScreenInfo { width: 1080, height: 1920 }));
+        assert_eq!(
+            parse_geometry("1920x1080"),
+            Some(ScreenInfo {
+                width: 1920,
+                height: 1080
+            })
+        );
+        assert_eq!(
+            parse_geometry("3840x2160"),
+            Some(ScreenInfo {
+                width: 3840,
+                height: 2160
+            })
+        );
+        assert_eq!(
+            parse_geometry(" 800x 600 "),
+            Some(ScreenInfo {
+                width: 800,
+                height: 600
+            })
+        );
+        assert_eq!(
+            parse_geometry("1080x1920"),
+            Some(ScreenInfo {
+                width: 1080,
+                height: 1920
+            })
+        );
     }
 
     #[test]
@@ -125,7 +149,10 @@ mod tests {
     fn screen_or_default_fills_1080p() {
         let d = screen_or_default(None);
         assert_eq!((d.width, d.height), (1920, 1080));
-        let s = screen_or_default(Some(ScreenInfo { width: 2560, height: 1440 }));
+        let s = screen_or_default(Some(ScreenInfo {
+            width: 2560,
+            height: 1440,
+        }));
         assert_eq!((s.width, s.height), (2560, 1440));
     }
 
@@ -164,7 +191,14 @@ mod tests {
         let _ = s.set_string("wallhaven-query", "ocean");
         let _ = s.set_string("unsplash-content-filter", "high");
 
-        let wh = wallhaven(&s, Some("key".into()), Some(ScreenInfo { width: 2560, height: 1440 }));
+        let wh = wallhaven(
+            &s,
+            Some("key".into()),
+            Some(ScreenInfo {
+                width: 2560,
+                height: 1440,
+            }),
+        );
         assert_eq!(wh.query, "ocean");
         assert_eq!(wh.atleast, "2560x1440");
         assert_eq!(wh.api_key.as_deref(), Some("key"));
@@ -174,7 +208,14 @@ mod tests {
         assert_eq!(wh_noscreen.atleast, "1920x1080"); // default screen
         assert!(wh_noscreen.api_key.is_none());
 
-        let un = unsplash(&s, Some("un-key".into()), Some(ScreenInfo { width: 1080, height: 1920 }));
+        let un = unsplash(
+            &s,
+            Some("un-key".into()),
+            Some(ScreenInfo {
+                width: 1080,
+                height: 1920,
+            }),
+        );
         assert_eq!(un.orientation, "portrait");
         assert_eq!(un.content_filter, "high");
         assert_eq!(un.access_key.as_deref(), Some("un-key"));
@@ -190,8 +231,20 @@ mod tests {
         // an initial value, only roundtrip consistency.
         std::env::set_var("GSETTINGS_BACKEND", "memory");
         let s = gio::Settings::new("io.github.tunix.valhalla");
-        store_screen_geometry(&s, ScreenInfo { width: 3440, height: 1440 });
-        assert_eq!(screen_geometry(&s), Some(ScreenInfo { width: 3440, height: 1440 }));
+        store_screen_geometry(
+            &s,
+            ScreenInfo {
+                width: 3440,
+                height: 1440,
+            },
+        );
+        assert_eq!(
+            screen_geometry(&s),
+            Some(ScreenInfo {
+                width: 3440,
+                height: 1440
+            })
+        );
         // Garbage write is rejected by the schema type; parse side still
         // yields a value (whatever valid one is stored). The contract under
         // test: parse never panics and only valid WxH strings surface.
@@ -205,9 +258,15 @@ mod tests {
     /// verify the pure mapping (settings value -> cfg field) instead.
     #[test]
     fn atleast_and_ratios_derive_from_screen() {
-        let sc = ScreenInfo { width: 2560, height: 1440 };
+        let sc = ScreenInfo {
+            width: 2560,
+            height: 1440,
+        };
         assert_eq!(format!("{}x{}", sc.width, sc.height), "2560x1440");
         let ratios = screen::wallhaven_ratios(sc).join(",");
-        assert!(ratios.contains("16x9"), "2560x1440 -> 16x9 family, got {ratios}");
+        assert!(
+            ratios.contains("16x9"),
+            "2560x1440 -> 16x9 family, got {ratios}"
+        );
     }
 }
