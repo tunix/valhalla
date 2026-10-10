@@ -93,10 +93,6 @@ async fn apply_portal(path: &Path, lockscreen: bool) -> Result<(), String> {
 mod tests {
     use super::*;
 
-    fn tmp_marker(name: &str) -> std::path::PathBuf {
-        std::env::temp_dir().join(format!("valhalla-applier-{name}-{}", std::process::id()))
-    }
-
     #[test]
     fn detect_prefers_gsettings_when_schema_present() {
         // The org.gnome.desktop.background schema ships with gsettings-desktop-schemas,

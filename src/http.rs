@@ -157,8 +157,8 @@ mod tests {
         assert!(cd.ends_with("valhalla"));
         assert!(thumbs_dir().is_absolute());
         assert!(wallpapers_dir().is_absolute());
-        assert!(thumbs_dir().starts_with(&cache_dir()));
-        assert!(wallpapers_dir().starts_with(&cache_dir()));
+        assert!(thumbs_dir().starts_with(cache_dir()));
+        assert!(wallpapers_dir().starts_with(cache_dir()));
         assert!(thumbs_dir().exists());
         assert!(wallpapers_dir().exists());
     }

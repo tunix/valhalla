@@ -52,6 +52,7 @@ impl StateStore {
     }
 
     /// A store rooted at an explicit directory (tests, sandboxes).
+    #[allow(dead_code)] // test-only seam; kept pub for future daemon use
     pub fn at_dir(dir: PathBuf) -> Self {
         let _ = std::fs::create_dir_all(&dir);
         Self { dir }
