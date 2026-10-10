@@ -43,7 +43,7 @@
     <release version="0.2.0" date="2026-09-27">
       <description>
         <ul>
-          <li>Headless daemon mode with systemd user service management</li>
+          <li>Headless daemon mode for background wallpaper refresh</li>
           <li>Wallhaven and Unsplash sources with tag, purity and orientation filters</li>
           <li>Perceptual brightness analysis for theme-aware selection</li>
         </ul>

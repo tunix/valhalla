@@ -1,4 +1,5 @@
 mod app;
+mod autostart;
 mod applier;
 mod brightness;
 mod config;
