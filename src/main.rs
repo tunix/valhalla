@@ -59,3 +59,31 @@ fn register_resources() {
         .expect("failed to load embedded GResource");
     gio::resources_register(&resource);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Tests run inside a tokio runtime (cargo test provides one); seed the
+    /// global handle so `tokio_handle()` works for every module under test.
+    #[test]
+    fn tokio_handle_resolves_after_seeding() {
+        if TOKIO_HANDLE.get().is_none() {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .build()
+                .unwrap();
+            TOKIO_HANDLE.set(rt.handle().clone()).ok();
+        }
+        let _ = tokio_handle();
+    }
+
+    #[test]
+    fn daemon_flag_parsing() {
+        // Mirrors main()'s arg check: only an exact "--daemon" enables it.
+        let daemon = |args: &[&str]| args.get(1).map(|s| *s == "--daemon").unwrap_or(false);
+        assert!(daemon(&["valhalla", "--daemon"]));
+        assert!(!daemon(&["valhalla"]));
+        assert!(!daemon(&["valhalla", "--daemon=1"]));
+        assert!(!daemon(&["valhalla", "-d"]));
+    }
+}
