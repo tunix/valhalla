@@ -231,7 +231,7 @@ fn login_service_row() -> adw::SwitchRow {
                     // Error marker: surface why the toggle failed instead of
                     // snapping back silently.
                     if let Some(err) = ERRMSG.with(|m| m.borrow_mut().take()) {
-                        row.set_subtitle(format!("Unavailable: {err}"));
+                        row.set_subtitle(&format!("Unavailable: {err}"));
                     }
                     continue;
                 }
