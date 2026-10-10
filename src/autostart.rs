@@ -152,7 +152,8 @@ mod tests {
     #[test]
     fn exec_command_in_appimage_mode() {
         // Fake an AppImage runtime: $APPIMAGE pointing at a real file.
-        let fake = std::env::temp_dir().join(format!("fake-appimage-{}.AppImage", std::process::id()));
+        let fake =
+            std::env::temp_dir().join(format!("fake-appimage-{}.AppImage", std::process::id()));
         std::fs::write(&fake, b"magma").unwrap();
         std::env::set_var("APPIMAGE", &fake);
         let cmd = exec_command();
