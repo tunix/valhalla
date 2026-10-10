@@ -34,7 +34,7 @@ blinding white wallpaper.
   direct GSettings fallback on GNOME; sets `picture-uri` and `picture-uri-dark`
   independently so a manual theme flip never shows a mismatched wallpaper
 - **Headless daemon** (`valhalla --daemon`) for refreshing without a window,
-  plus a systemd user unit
+  with an opt-in "Start at login" switch (XDG autostart entry)
 
 ## Building
 
@@ -96,14 +96,10 @@ cargo run            # GUI
 cargo run -- --daemon  # headless wallpaper refresh service
 ```
 
-To refresh at boot/login without the window, install the systemd user unit:
-
-```sh
-cp data/valhalla.service ~/.config/systemd/user/
-# adjust ExecStart to point at the binary
-systemctl --user daemon-reload
-systemctl --user enable --now valhalla.service
-```
+To refresh at boot/login without the window, enable **Start at login** in
+Preferences — Valhalla writes a desktop autostart entry that launches
+`valhalla --daemon`. The entry also shows up in the desktop's own
+"Startup Applications" list, so it can be toggled off from either side.
 
 ## Settings
 
