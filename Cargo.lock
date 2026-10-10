@@ -2893,7 +2893,7 @@ dependencies = [
 
 [[package]]
 name = "valhalla"
-version = "0.5.1"
+version = "1.0.0"
 dependencies = [
  "ashpd",
  "async-channel",

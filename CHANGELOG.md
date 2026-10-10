@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.0.0](https://github.com/tunix/valhalla/compare/v0.5.1...v1.0.0) (2026-10-10)
+
+
+### ⚠ BREAKING CHANGES
+
+* drop systemd user service; portal-first everywhere ([#40](https://github.com/tunix/valhalla/issues/40))
+
+### Features
+
+* **ui:** opt-in Start at login via XDG autostart ([#42](https://github.com/tunix/valhalla/issues/42)) ([3b15358](https://github.com/tunix/valhalla/commit/3b1535887d359e9b3102a6df2ac2de69871fbadf))
+
+
+### Bug Fixes
+
+* **autostart:** Exec=valhalla --daemon via PATH, not current_exe ([#43](https://github.com/tunix/valhalla/issues/43)) ([5263adc](https://github.com/tunix/valhalla/commit/5263adcacd70a704f600ffa914b07f6de50f44f1))
+* **autostart:** resolve Exec per packaging mode (AppImage via $APPIMAGE) ([#44](https://github.com/tunix/valhalla/issues/44)) ([4fa1f6e](https://github.com/tunix/valhalla/commit/4fa1f6e02afad99fc7a33c870fed77f576c548f9))
+* startup defaults on; systemd login-toggle fixes ([#38](https://github.com/tunix/valhalla/issues/38)) ([9e42fcb](https://github.com/tunix/valhalla/commit/9e42fcbb97cc5442d47fbfcde7035484de778d76))
+
+
+### Code Refactoring
+
+* drop systemd user service; portal-first everywhere ([#40](https://github.com/tunix/valhalla/issues/40)) ([68a0251](https://github.com/tunix/valhalla/commit/68a0251399c8aac4701d41b073092f8fb288afab))
+
 ## [0.5.1](https://github.com/tunix/valhalla/compare/v0.5.0...v0.5.1) (2026-09-27)
 
 
