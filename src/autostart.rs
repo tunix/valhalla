@@ -67,8 +67,8 @@ pub fn is_enabled() -> bool {
     }
 }
 
-/// Write (or re-point) the autostart entry. The Exec line is always
-/// `valhalla --daemon` (PATH-resolved) — see ENTRY_TEMPLATE docs.
+/// Write (or re-point) the autostart entry. The Exec line is resolved by
+/// packaging mode — see [`exec_command`].
 pub fn enable() -> Result<(), String> {
     let dir = autostart_dir();
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -103,7 +103,7 @@ mod tests {
         // 1) starts disabled
         assert!(!is_enabled());
 
-        // 2) enable writes a valid entry with a PATH-based Exec
+        // 2) enable writes a valid entry with the packaging-appropriate Exec
         enable().expect("enable");
         assert!(is_enabled());
         let text = std::fs::read_to_string(entry_path()).unwrap();
@@ -111,6 +111,7 @@ mod tests {
         assert!(text.contains("Exec=valhalla --daemon"));
         assert!(text.contains(&format!("Icon={APP_ID}")));
         assert!(!text.contains("{exe}"), "placeholder substituted");
+        assert!(!text.contains("{exec}"), "placeholder substituted");
 
         // 3) disabled flag in the file counts as off
         let text = std::fs::read_to_string(entry_path()).unwrap();
@@ -146,5 +147,27 @@ mod tests {
 
         std::env::remove_var("XDG_CONFIG_HOME");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn exec_command_in_appimage_mode() {
+        // Fake an AppImage runtime: $APPIMAGE pointing at a real file.
+        let fake = std::env::temp_dir().join(format!("fake-appimage-{}.AppImage", std::process::id()));
+        std::fs::write(&fake, b"magma").unwrap();
+        std::env::set_var("APPIMAGE", &fake);
+        let cmd = exec_command();
+        std::env::remove_var("APPIMAGE");
+        std::fs::remove_file(&fake).ok();
+        // Quoted path + daemon flag.
+        assert!(cmd.starts_with('"'), "path must be quoted: {cmd}");
+        assert!(cmd.ends_with("\" --daemon"), "cmd: {cmd}");
+    }
+
+    #[test]
+    fn exec_command_nonexistent_appimage_falls_back() {
+        std::env::set_var("APPIMAGE", "/nonexistent/path.AppImage");
+        let cmd = exec_command();
+        std::env::remove_var("APPIMAGE");
+        assert_eq!(cmd, "valhalla --daemon");
     }
 }
