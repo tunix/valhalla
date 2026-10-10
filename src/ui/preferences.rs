@@ -214,17 +214,30 @@ fn login_service_row() -> adw::SwitchRow {
         });
     }
 
+    thread_local! {
+        static ERRMSG: std::cell::RefCell<Option<String>> =
+            const { std::cell::RefCell::new(None) };
+    }
+
     {
         let handler = handler.clone();
         let row_weak = row.downgrade();
         glib::spawn_future_local(async move {
-            while let Ok(enabled) = rx.recv().await {
+            while let Ok(value) = rx.recv().await {
                 let Some(row) = row_weak.upgrade() else {
                     continue;
                 };
+                if value {
+                    // Error marker: surface why the toggle failed instead of
+                    // snapping back silently.
+                    if let Some(err) = ERRMSG.with(|m| m.borrow_mut().take()) {
+                        row.set_subtitle(format!("Unavailable: {err}"));
+                    }
+                    continue;
+                }
                 if let Some(id) = handler.borrow().as_ref() {
                     row.block_signal(id);
-                    row.set_active(enabled);
+                    row.set_active(value);
                     row.unblock_signal(id);
                 }
             }
@@ -247,11 +260,9 @@ fn login_service_row() -> adw::SwitchRow {
                     tracing::warn!("systemd service toggle failed: {e}");
                     // Revert the switch; the handler is blocked during the
                     // programmatic set so this does not re-trigger the toggle.
-                    // Surfacing the reason beats a silent snap-back: the user
-                    // sees WHY login startup did not stick.
                     let _ = tx.send_blocking(!turning_on);
-                    let _ = tx
-                        .send_blocking(crate::scheduler::Msg::Info(format!("Login service: {e}")));
+                    let _ = tx.send_blocking(true); // error marker
+                    ERRMSG.with(|m| m.borrow_mut().replace(e));
                 }
             });
         })
