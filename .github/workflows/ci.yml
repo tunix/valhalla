@@ -115,6 +115,76 @@ jobs:
               await github.rest.issues.createComment({ ...opts, body });
             }
 
+  coverage:
+    name: Test coverage
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    container: fedora:latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # cargo-llvm-cov drives rustc's -C instrument-coverage; the llvm-tools
+      # component supplies llvm-profdata/llvm-cov for report generation.
+      - name: Install toolchain
+        run: >
+          dnf install -y rust cargo clang gcc pkgconf-pkg-config
+          gtk4-devel libadwaita-devel libsecret-devel glib2-devel
+          blueprint-compiler git
+        # clang installs the matching llvm-tools; rustup adds the rust-side one.
+
+      - name: Install cargo-llvm-cov
+        run: |
+          set -eu
+          mkdir -p ~/.cargo/bin
+          curl -sSfL -o ~/.cargo/bin/cargo-llvm-cov \
+            "https://github.com/taiki-e/cargo-llvm-cov/releases/download/v0.9.1/cargo-llvm-cov-x86_64-unknown-linux-gnu.tar.gz"
+          tar -xzf ~/.cargo/bin/cargo-llvm-cov.tar.gz -C ~/.cargo/bin --strip-components=1
+          chmod 0755 ~/.cargo/bin/cargo-llvm-cov
+          rustup component add llvm-tools-preview
+
+      - name: Cache cargo artifacts
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            /root/.cargo/registry
+            /root/.cargo/git
+          key: fedora-cargo-cov-${{ hashFiles('Cargo.lock') }}
+          restore-keys: fedora-cargo-cov-
+
+      - name: Run tests with coverage
+        run: |
+          set -eu
+          . "$HOME/.cargo/env"
+          cargo llvm-cov --lcov --output-path coverage/lcov.info | tee coverage/summary.txt
+
+      - name: Extract coverage total
+        id: cov
+        run: |
+          set -eu
+          read HIT FOUND <<<"$(awk '
+            /^LH:/ {h += substr($0, 4)} /^LF:/ {f += substr($0, 4)}
+            END {printf "%d %d", h, f}' coverage/lcov.info)"
+          PCT=$(python3 -c "print(f'{100 * $HIT / max($FOUND, 1):.1f}')")
+          echo "pct=$PCT" >> "$GITHUB_OUTPUT"
+          echo "Coverage: $HIT/$FOUND lines ($PCT%)"
+
+      # Reports surface as job artifacts on the PR's workflow run page.
+      - name: Upload coverage report
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-report
+          path: coverage/
+          if-no-files-found: error
+
+      - name: Job summary
+        if: always()
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          ## Coverage
+          Line coverage: **${{ steps.cov.outputs.pct || 'n/a' }}%**
+          Artifacts: lcov.info (+ HTML view via genhtml if present).
+          EOF
+
   label:
     name: Label PR
     if: github.event_name == 'pull_request'
