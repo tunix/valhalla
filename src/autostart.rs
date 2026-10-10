@@ -16,22 +16,30 @@ use std::path::PathBuf;
 
 const APP_ID: &str = "io.github.tunix.valhalla";
 
-/// The entry always launches `valhalla --daemon` via PATH, never the running
-/// binary's own path. Reasons (both hit in practice):
-///   1. Debug/dev builds would otherwise point the entry at
-///      `target/debug/deps/valhalla-<hash>` — a file that vanishes with the
-///      next `cargo test`.
-///   2. Flatpak's `current_exe` is a sandbox-internal path the host session
-///      cannot execute; `valhalla` resolves through the flatpak's exported
-///      launcher on PATH.
-///
-/// The daemon logic is identical in every build, so PATH resolution is both
-/// correct and simplest.
+/// Exec resolution by packaging mode:
+///   - Native/deb/rpm: `valhalla --daemon` via PATH (binary installed to
+///     /usr/bin or ~/.cargo/bin).
+///   - Flatpak: `valhalla --daemon` via PATH (flatpak exports the launcher
+///     on PATH in the session; sandbox-internal current_exe is unusable).
+///   - AppImage: the binary only exists under a transient /tmp/.mount_*
+///     mount, so PATH is not an option — the entry must point at the
+///     AppImage file itself (the path is stable as long as the user keeps
+///     the file where it is, which is the normal case).
+fn exec_command() -> String {
+    // AppImage runtime sets $APPIMAGE to the absolute path of the file.
+    match std::env::var("APPIMAGE") {
+        Ok(path) if !path.is_empty() && std::path::Path::new(&path).is_file() => {
+            format!("{path:?} --daemon") // quoted: paths may contain spaces
+        }
+        _ => "valhalla --daemon".to_string(),
+    }
+}
+
 const ENTRY_TEMPLATE: &str = r#"[Desktop Entry]
 Type=Application
 Name=Valhalla (background)
 Comment=Theme-aware wallpaper refresh daemon
-Exec=valhalla --daemon
+Exec={exec}
 Icon={app_id}
 Terminal=false
 X-GNOME-Autostart-enabled=true
@@ -64,7 +72,9 @@ pub fn is_enabled() -> bool {
 pub fn enable() -> Result<(), String> {
     let dir = autostart_dir();
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let entry = ENTRY_TEMPLATE.replace("{app_id}", APP_ID);
+    let entry = ENTRY_TEMPLATE
+        .replace("{exec}", &exec_command())
+        .replace("{app_id}", APP_ID);
     std::fs::write(entry_path(), entry).map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -97,6 +107,7 @@ mod tests {
         enable().expect("enable");
         assert!(is_enabled());
         let text = std::fs::read_to_string(entry_path()).unwrap();
+        // Test env has no $APPIMAGE -> PATH-resolved Exec.
         assert!(text.contains("Exec=valhalla --daemon"));
         assert!(text.contains(&format!("Icon={APP_ID}")));
         assert!(!text.contains("{exe}"), "placeholder substituted");
