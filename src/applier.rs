@@ -161,7 +161,7 @@ mod tests {
             .build()
             .unwrap();
         let err = rt
-            .block_on(async { result.await })
+            .block_on(result)
             .expect_err("no dark wallpaper must fail");
         assert!(err.contains("no wallpaper"));
     }

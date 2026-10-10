@@ -182,8 +182,7 @@ mod tests {
     fn resized_url_fallback_appends_params() {
         // Mirrors the candidates() mapping: no full URL -> raw + params.
         let raw = "https://u/raw?ixid=1";
-        let full: Option<String> = None;
-        let image_url = full.unwrap_or_else(|| format!("{raw}&fm=jpg&w=3840&q=85&fit=max"));
+        let image_url = format!("{raw}&fm=jpg&w=3840&q=85&fit=max");
         assert!(image_url.starts_with(raw));
         assert!(image_url.contains("ixid=1")); // ixid preserved per API guidelines
         assert!(image_url.contains("fm=jpg"));

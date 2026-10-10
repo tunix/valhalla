@@ -125,7 +125,7 @@ mod tests {
         let p = cached_path("https://example.com/img?x=jpeg", dir);
         assert_eq!(
             p.extension().and_then(|e| e.to_str()),
-            Some("jpeg").filter(|_| false).or(Some("jpg"))
+            Some("jpg")
         );
     }
 
