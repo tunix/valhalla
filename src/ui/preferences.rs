@@ -247,7 +247,11 @@ fn login_service_row() -> adw::SwitchRow {
                     tracing::warn!("systemd service toggle failed: {e}");
                     // Revert the switch; the handler is blocked during the
                     // programmatic set so this does not re-trigger the toggle.
+                    // Surfacing the reason beats a silent snap-back: the user
+                    // sees WHY login startup did not stick.
                     let _ = tx.send_blocking(!turning_on);
+                    let _ = tx
+                        .send_blocking(crate::scheduler::Msg::Info(format!("Login service: {e}")));
                 }
             });
         })

@@ -5,6 +5,13 @@ use std::path::PathBuf;
 
 const UNIT_NAME: &str = "valhalla.service";
 
+/// Hard cap on any systemctl invocation: the user-manager D-Bus call can
+/// block for the full bus timeout when the session is half-up (early login,
+/// sandboxed environments), which froze the preferences toggle. 15 s is
+/// generous for enable/disable/is-enabled; exceeding it fails the call so
+/// the UI can surface the error instead of hanging.
+const SYSTEMCTL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+
 const UNIT_TEMPLATE: &str = r#"[Unit]
 Description=Valhalla wallpaper service
 PartOf=graphical-session.target
@@ -59,8 +66,10 @@ fn systemctl(args: &[&str]) -> Result<(), String> {
     }
 }
 
-/// Whether the user manager reports the unit as enabled.
-pub fn is_enabled() -> bool {
+/// Whether the user manager reports the unit as enabled. Kept for the
+/// direct-query path used by tests; the UI uses is_enabled()'s bus-tolerant
+/// version below.
+fn is_enabled_direct() -> bool {
     let Ok(output) = std::process::Command::new("systemctl")
         .args(["--user", "is-enabled", UNIT_NAME])
         .output()
@@ -70,14 +79,83 @@ pub fn is_enabled() -> bool {
     String::from_utf8_lossy(&output.stdout).trim() == "enabled"
 }
 
-/// Install the unit and start it right away.
+fn systemctl_with_timeout(args: &[&str]) -> Result<(), String> {
+    use std::io::Read;
+    use std::process::Stdio;
+    let mut child = std::process::Command::new("systemctl")
+        .arg("--user")
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("systemctl: {e}"))?;
+    let deadline = std::time::Instant::now() + SYSTEMCTL_TIMEOUT;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let mut stderr = String::new();
+                if let Some(mut pipe) = child.stderr.take() {
+                    let _ = pipe.read_to_string(&mut stderr);
+                }
+                return if status.success() {
+                    Ok(())
+                } else {
+                    Err(stderr.trim().to_string())
+                };
+            }
+            Ok(None) => {
+                if std::time::Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(format!(
+                        "systemctl {} timed out after {SYSTEMCTL_TIMEOUT:?}",
+                        args.join(" ")
+                    ));
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            Err(e) => return Err(format!("systemctl: {e}")),
+        }
+    }
+}
+
+/// Whether the unit is enabled for future logins.
+///
+/// Prefers the manager's answer, but when the user bus is unreachable
+/// (is-enabled errors out), falls back to checking the enablement symlink
+/// under the unit dir — the toggle must reflect reality even while the
+/// session bus is half-up.
+pub fn is_enabled() -> bool {
+    if let Ok(output) = std::process::Command::new("systemctl")
+        .args(["--user", "is-enabled", UNIT_NAME])
+        .output()
+    {
+        return String::from_utf8_lossy(&output.stdout).trim() == "enabled";
+    }
+    // Fallback: `enable` links <unit-dir>/../default.target.wants/<unit>.
+    unit_dir()
+        .parent()
+        .map(|p| p.join("default.target.wants").join(UNIT_NAME).is_file())
+        .unwrap_or(false)
+}
+
+/// Install the unit, enable it for future logins, and start it now.
+///
+/// Enabling and starting are separate calls on purpose: a failed start
+/// (e.g. the daemon exits immediately in a sandbox) must NOT undo the
+/// enablement — the service is wanted at every future login regardless.
+/// Start errors are logged, not returned; the switch stays on.
 pub fn enable_start() -> Result<(), String> {
     install()?;
-    systemctl(&["enable", "--now", UNIT_NAME])
+    systemctl_with_timeout(&["enable", UNIT_NAME])?;
+    if let Err(e) = systemctl_with_timeout(&["start", UNIT_NAME]) {
+        tracing::warn!("service enabled but the start failed (retries at next login): {e}");
+    }
+    Ok(())
 }
 
 pub fn stop_disable() -> Result<(), String> {
-    systemctl(&["disable", "--now", UNIT_NAME])
+    systemctl_with_timeout(&["disable", "--now", UNIT_NAME])
 }
 
 #[cfg(test)]
@@ -105,9 +183,9 @@ mod tests {
         install().expect("unit installed");
         assert!(unit_path().exists());
         systemctl(&["enable", UNIT_NAME]).expect("enabled");
-        assert!(is_enabled());
+        assert!(is_enabled_direct());
         systemctl(&["disable", UNIT_NAME]).expect("disabled");
-        assert!(!is_enabled());
+        assert!(!is_enabled_direct());
         std::fs::remove_file(unit_path()).ok();
     }
 
