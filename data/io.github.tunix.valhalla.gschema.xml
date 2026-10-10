@@ -17,7 +17,7 @@
       <description>Pick wallpapers that suit the current light or dark appearance.</description>
     </key>
     <key name="match-strictness" type="s">
-      <default>"prefer"</default>
+      <default>"require"</default>
       <summary>Theme match strictness</summary>
       <description>"prefer" falls back to any wallpaper, "require" keeps the current one when nothing matches.</description>
     </key>
@@ -37,12 +37,12 @@
       <description>Download a fresh wallpaper when the app or daemon starts. Off by default.</description>
     </key>
     <key name="run-in-background" type="b">
-      <default>false</default>
+      <default>true</default>
       <summary>Run in the background</summary>
       <description>Keep refreshing wallpapers while the window is closed.</description>
     </key>
     <key name="apply-lockscreen" type="b">
-      <default>false</default>
+      <default>true</default>
       <summary>Also change the lock screen</summary>
       <description>Apply wallpapers to the lock screen as well.</description>
     </key>
