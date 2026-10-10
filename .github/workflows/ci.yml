@@ -140,6 +140,8 @@ jobs:
             "https://github.com/taiki-e/cargo-llvm-cov/releases/download/v0.9.1/cargo-llvm-cov-x86_64-unknown-linux-gnu.tar.gz"
           tar -xzf ~/.cargo/bin/cargo-llvm-cov.tar.gz -C ~/.cargo/bin
           chmod 0755 ~/.cargo/bin/cargo-llvm-cov
+          # Fedora ships rustup-managed toolchains; cargo env puts rustup on PATH.
+          . "$HOME/.cargo/env"
           rustup component add llvm-tools-preview
 
       - name: Cache cargo artifacts
