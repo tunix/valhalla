@@ -127,10 +127,16 @@ jobs:
       # component supplies llvm-profdata/llvm-cov for report generation.
       - name: Install toolchain
         run: >
-          dnf install -y rust cargo clang gcc pkgconf-pkg-config
+          dnf install -y clang gcc pkgconf-pkg-config
           gtk4-devel libadwaita-devel libsecret-devel glib2-devel
           blueprint-compiler git
-        # clang installs the matching llvm-tools; rustup adds the rust-side one.
+
+      - name: Install rustup + toolchain
+        run: |
+          set -eu
+          curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --component llvm-tools-preview
+          . "$HOME/.cargo/env"
+          rustc --version
 
       - name: Install cargo-llvm-cov
         run: |
@@ -140,9 +146,6 @@ jobs:
             "https://github.com/taiki-e/cargo-llvm-cov/releases/download/v0.9.1/cargo-llvm-cov-x86_64-unknown-linux-gnu.tar.gz"
           tar -xzf ~/.cargo/bin/cargo-llvm-cov.tar.gz -C ~/.cargo/bin
           chmod 0755 ~/.cargo/bin/cargo-llvm-cov
-          # Fedora ships rustup-managed toolchains; cargo env puts rustup on PATH.
-          . "$HOME/.cargo/env"
-          rustup component add llvm-tools-preview
 
       - name: Cache cargo artifacts
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
