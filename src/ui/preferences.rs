@@ -180,6 +180,46 @@ fn general_page(settings: &gio::Settings) -> adw::PreferencesPage {
         .build();
     behavior_group.add(&startup);
 
+    let login = adw::SwitchRow::new();
+    login.set_title("Start at login");
+    login.set_subtitle("Launch the background daemon automatically when you log in");
+    // Reflect current state; toggle drives the real action on a blocking
+    // thread (file IO must stay off the main loop).
+    login.set_active(crate::autostart::is_enabled());
+    {
+        let row_weak = login.downgrade();
+        login.connect_active_notify(move |row| {
+            let want = row.is_active();
+            // Widgets are main-thread-only: the blocking job does file IO and
+            // reports back over a channel; the receiver (main loop) re-syncs
+            // the switch with reality.
+            let (done_tx, done_rx) = async_channel::unbounded::<Result<(), String>>();
+            crate::tokio_handle().spawn_blocking(move || {
+                let result = if want {
+                    crate::autostart::enable()
+                } else {
+                    crate::autostart::disable()
+                };
+                let _ = done_tx.send_blocking(result);
+            });
+            let row_weak = row_weak.clone();
+            glib::spawn_future_local(async move {
+                if let Ok(res) = done_rx.recv().await {
+                    if let Err(e) = res {
+                        tracing::warn!("autostart toggle failed: {e}");
+                    }
+                    if let Some(row) = row_weak.upgrade() {
+                        let actual = crate::autostart::is_enabled();
+                        if row.is_active() != actual {
+                            row.set_active(actual);
+                        }
+                    }
+                }
+            });
+        });
+    }
+    behavior_group.add(&login);
+
     page
 }
 

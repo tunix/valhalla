@@ -15,7 +15,7 @@
     "--device=dri",
     "--talk-name=org.freedesktop.portal.Desktop",
     "--talk-name=org.freedesktop.secrets",
-    "--talk-name=org.freedesktop.systemd1"
+    "--filesystem=xdg-config/autostart:create"
   ],
   "build-options": {
     "append-path": "/usr/lib/sdk/rust-stable/bin",
