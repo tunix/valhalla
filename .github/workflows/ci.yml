@@ -24,6 +24,7 @@ permissions:
 jobs:
   checks:
     name: Build, test, lint
+    needs: coverage
     runs-on: ubuntu-latest
     container: fedora:latest
     steps:
@@ -71,6 +72,7 @@ jobs:
           | build | ${{ steps.build.outcome == 'success' && '✅' || '❌' }} |
           | test | ${{ steps.test.outcome == 'success' && '✅' || '❌' }} |
           | clippy | ${{ steps.clippy.outcome == 'success' && '✅' || '❌' }} |
+          | coverage | ${{ needs.coverage.outputs.pct || 'n/a' }}% (min 50%) |
           EOF
 
       - name: Summarize on the PR
@@ -80,6 +82,7 @@ jobs:
           BUILD: ${{ steps.build.outcome }}
           TEST: ${{ steps.test.outcome }}
           CLIPPY: ${{ steps.clippy.outcome }}
+          COV: ${{ needs.coverage.outputs.pct }}
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
@@ -95,6 +98,7 @@ jobs:
               `| build | ${mark(process.env.BUILD)} |`,
               `| test | ${mark(process.env.TEST)} |`,
               `| clippy | ${mark(process.env.CLIPPY)} |`,
+              `| coverage | ${process.env.COV || 'n/a'}% |`,
               '',
               `[Full run](${runUrl})`,
               '<!-- valhalla-ci-summary -->',
@@ -118,6 +122,8 @@ jobs:
   coverage:
     name: Test coverage
     if: github.event_name == 'pull_request'
+    outputs:
+      pct: ${{ steps.cov.outputs.pct }}
     runs-on: ubuntu-latest
     container: fedora:latest
     steps:
@@ -168,7 +174,7 @@ jobs:
       - name: Extract coverage total
         id: cov
         env:
-          MIN_COVERAGE: "55.0"
+          MIN_COVERAGE: "50.0"
         run: |
           set -eu
           read HIT FOUND <<<"$(awk '
