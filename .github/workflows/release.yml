@@ -188,7 +188,7 @@ jobs:
           - arch: aarch64
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
-    container: ubuntu:24.04
+    container: ubuntu:26.04
     env:
       TAG: ${{ inputs.tag || needs.release-please.outputs.tag_name }}
       ARCH: ${{ matrix.arch }}
