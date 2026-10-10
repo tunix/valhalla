@@ -16,12 +16,22 @@ use std::path::PathBuf;
 
 const APP_ID: &str = "io.github.tunix.valhalla";
 
-/// The entry launches the same executable that is running now, headless.
+/// The entry always launches `valhalla --daemon` via PATH, never the running
+/// binary's own path. Reasons (both hit in practice):
+///   1. Debug/dev builds would otherwise point the entry at
+///      `target/debug/deps/valhalla-<hash>` — a file that vanishes with the
+///      next `cargo test`.
+///   2. Flatpak's `current_exe` is a sandbox-internal path the host session
+///      cannot execute; `valhalla` resolves through the flatpak's exported
+///      launcher on PATH.
+///
+/// The daemon logic is identical in every build, so PATH resolution is both
+/// correct and simplest.
 const ENTRY_TEMPLATE: &str = r#"[Desktop Entry]
 Type=Application
 Name=Valhalla (background)
 Comment=Theme-aware wallpaper refresh daemon
-Exec={exe} --daemon
+Exec=valhalla --daemon
 Icon={app_id}
 Terminal=false
 X-GNOME-Autostart-enabled=true
@@ -49,14 +59,12 @@ pub fn is_enabled() -> bool {
     }
 }
 
-/// Write (or re-point) the autostart entry at the current executable.
+/// Write (or re-point) the autostart entry. The Exec line is always
+/// `valhalla --daemon` (PATH-resolved) — see ENTRY_TEMPLATE docs.
 pub fn enable() -> Result<(), String> {
-    let exe = std::env::current_exe().map_err(|e| format!("current_exe: {e}"))?;
     let dir = autostart_dir();
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let entry = ENTRY_TEMPLATE
-        .replace("{exe}", &exe.display().to_string())
-        .replace("{app_id}", APP_ID);
+    let entry = ENTRY_TEMPLATE.replace("{app_id}", APP_ID);
     std::fs::write(entry_path(), entry).map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -85,11 +93,11 @@ mod tests {
         // 1) starts disabled
         assert!(!is_enabled());
 
-        // 2) enable writes a valid entry
+        // 2) enable writes a valid entry with a PATH-based Exec
         enable().expect("enable");
         assert!(is_enabled());
         let text = std::fs::read_to_string(entry_path()).unwrap();
-        assert!(text.contains("--daemon"));
+        assert!(text.contains("Exec=valhalla --daemon"));
         assert!(text.contains(&format!("Icon={APP_ID}")));
         assert!(!text.contains("{exe}"), "placeholder substituted");
 
