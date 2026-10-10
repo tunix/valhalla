@@ -9,7 +9,6 @@ mod scheduler;
 mod screen;
 mod source;
 mod state;
-mod systemd;
 mod theme;
 mod ui;
 
