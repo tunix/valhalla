@@ -163,8 +163,12 @@ jobs:
           mkdir -p coverage
           cargo llvm-cov --lcov --output-path coverage/lcov.info | tee coverage/summary.txt
 
+      # Gate: coverage must stay at or above MIN_COVERAGE. Raise the bar as
+      # test coverage grows — never lower it.
       - name: Extract coverage total
         id: cov
+        env:
+          MIN_COVERAGE: "55.0"
         run: |
           set -eu
           read HIT FOUND <<<"$(awk '
@@ -173,6 +177,13 @@ jobs:
           PCT=$(python3 -c "print(f'{100 * $HIT / max($FOUND, 1):.1f}')")
           echo "pct=$PCT" >> "$GITHUB_OUTPUT"
           echo "Coverage: $HIT/$FOUND lines ($PCT%)"
+          python3 -c "
+          pct, min_pct = float('$PCT'), float('$MIN_COVERAGE')
+          print(f'Coverage {pct}% (minimum {min_pct}%)')
+          if pct < min_pct:
+              print(f'::error::Coverage {pct}% is below the required {min_pct}%')
+              raise SystemExit(1)
+          "
 
       # Reports surface as job artifacts on the PR's workflow run page.
       - name: Upload coverage report

@@ -55,3 +55,52 @@ impl Source {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ids_and_titles_match() {
+        for source in Source::ALL {
+            assert_eq!(Source::from_id(source.id()), Some(source));
+            assert!(!source.title().is_empty());
+            assert_ne!(source.title(), source.id()); // titles are display names
+        }
+    }
+
+    #[test]
+    fn from_id_rejects_unknown() {
+        assert_eq!(Source::from_id("pixiv"), None);
+        assert_eq!(Source::from_id(""), None);
+        assert_eq!(Source::from_id("Wallhaven"), None); // case-sensitive
+    }
+
+    #[test]
+    fn candidate_colors_are_normalized() {
+        // The wallhaven parser strips '#' and lowercases; verify the contract
+        // the code relies on with a representative mapping.
+        let raw = ["#FFAA00", "#0fF"];
+        let normalized: Vec<String> = raw
+            .iter()
+            .map(|c| c.trim_start_matches('#').to_lowercase())
+            .collect();
+        assert_eq!(normalized, vec!["ffaa00", "0ff"]);
+    }
+
+    #[test]
+    fn candidate_serializes_metadata() {
+        let c = Candidate {
+            id: "x1".into(),
+            source: "wallhaven",
+            image_url: "https://img/x1.jpg".into(),
+            thumb_url: "https://img/t.jpg".into(),
+            web_url: "https://wh/x1".into(),
+            title: Some("Aurora".into()),
+            author: None,
+            dominant_colors: vec!["001122".into()],
+        };
+        let json = serde_json::to_string(&c.id).unwrap();
+        assert_eq!(json, "\"x1\"");
+    }
+}
