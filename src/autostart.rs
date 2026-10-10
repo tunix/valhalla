@@ -78,10 +78,7 @@ mod tests {
     // together, serially, so parallel tests cannot race the env.
     #[test]
     fn autostart_lifecycle_serial() {
-        let dir = std::env::temp_dir().join(format!(
-            "valhalla-autostart-{}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("valhalla-autostart-{}", std::process::id()));
         std::env::set_var("XDG_CONFIG_HOME", &dir);
         let _ = std::fs::remove_dir_all(&dir);
 
@@ -112,10 +109,7 @@ mod tests {
         let text = std::fs::read_to_string(entry_path()).unwrap();
         std::fs::write(
             entry_path(),
-            text.replace(
-                &format!("Icon={APP_ID}"),
-                "Icon=stale",
-            ),
+            text.replace(&format!("Icon={APP_ID}"), "Icon=stale"),
         )
         .unwrap();
         enable().expect("re-enable");
@@ -135,4 +129,3 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
-

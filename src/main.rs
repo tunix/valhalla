@@ -1,6 +1,6 @@
 mod app;
-mod autostart;
 mod applier;
+mod autostart;
 mod brightness;
 mod config;
 mod credentials;
