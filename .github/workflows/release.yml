@@ -109,7 +109,7 @@ jobs:
         env:
           TAG: ${{ inputs.tag || needs.release-please.outputs.tag_name }}
         with:
-          tag_name: ${{ env.TAG }} # step-level env: dispatch'te needs boşken inputs.tag geçer
+          tag_name: ${{ inputs.tag || needs.release-please.outputs.tag_name }}
           draft: true
           files: valhalla-*-${{ matrix.arch }}.tar.gz
 
@@ -172,7 +172,7 @@ jobs:
           # Dispatch runs skip release-please; inputs.tag must win there.
           TAG: ${{ inputs.tag || needs.release-please.outputs.tag_name }}
         with:
-          tag_name: ${{ env.TAG }}
+          tag_name: ${{ inputs.tag || needs.release-please.outputs.tag_name }}
           draft: true
           files: valhalla-*-${{ matrix.arch }}.flatpak
 
@@ -282,7 +282,7 @@ jobs:
           # Dispatch runs skip release-please; inputs.tag must win there.
           TAG: ${{ inputs.tag || needs.release-please.outputs.tag_name }}
         with:
-          tag_name: ${{ env.TAG }}
+          tag_name: ${{ inputs.tag || needs.release-please.outputs.tag_name }}
           draft: true
           files: |
             valhalla-*-${{ matrix.arch }}.AppImage
