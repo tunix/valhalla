@@ -77,7 +77,10 @@ fn register_icon_theme() {
 
 fn load_css() {
     let css = gtk::CssProvider::new();
-    css.load_from_string(".preview { border-radius: 16px; }\n");
+    css.load_from_string(
+        // Liked heart: destructive red per GNOME HIG
+        ".preview { border-radius: 16px; }\n.liked { color: @destructive_bg_color; }\n",
+    );
     if let Some(display) = gdk::Display::default() {
         gtk::style_context_add_provider_for_display(
             &display,
