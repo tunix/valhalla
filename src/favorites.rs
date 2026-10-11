@@ -182,7 +182,15 @@ mod tests {
         assert!(!contains("w1"));
 
         // add
-        add("w1", "wallhaven", &src, Some("Title".into()), Some("Ada".into()), Some(ColorScheme::Dark)).expect("add");
+        add(
+            "w1",
+            "wallhaven",
+            &src,
+            Some("Title".into()),
+            Some("Ada".into()),
+            Some(ColorScheme::Dark),
+        )
+        .expect("add");
         assert!(contains("w1"));
         let favs = list();
         assert_eq!(favs.len(), 1);
@@ -212,7 +220,10 @@ mod tests {
         // remove deletes list entry AND the stored copy
         remove("w1").expect("remove");
         assert!(!contains("w1"));
-        assert!(!stored.exists(), "stored copy must be deleted with the entry");
+        assert!(
+            !stored.exists(),
+            "stored copy must be deleted with the entry"
+        );
         // w2 untouched
         assert!(contains("w2"));
         remove("w2").expect("remove w2");

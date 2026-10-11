@@ -292,10 +292,13 @@ impl Window {
         imp.wallpaper_picture.set_filename(Some(&path));
         // Heart toggle subject on restored preview too (scheme label comes
         // from state; source is the entry's source).
-        let scheme = state
-            .scheme
-            .as_deref()
-            .map(|s| if s == "dark" { ColorScheme::Dark } else { ColorScheme::Light });
+        let scheme = state.scheme.as_deref().map(|s| {
+            if s == "dark" {
+                ColorScheme::Dark
+            } else {
+                ColorScheme::Light
+            }
+        });
         *imp.current_wallpaper.borrow_mut() = Some(CurrentWallpaper {
             id: entry.id.clone(),
             source: "wallhaven", // best-effort label; favorites lookups are by id
