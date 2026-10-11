@@ -4,6 +4,7 @@ mod autostart;
 mod brightness;
 mod config;
 mod credentials;
+mod favorites;
 mod fit;
 mod http;
 mod scheduler;
