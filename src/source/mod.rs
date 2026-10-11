@@ -21,15 +21,17 @@ pub struct Candidate {
 pub enum Source {
     Wallhaven,
     Unsplash,
+    Favorites,
 }
 
 impl Source {
-    pub const ALL: [Source; 2] = [Source::Wallhaven, Source::Unsplash];
+    pub const ALL: [Source; 3] = [Source::Wallhaven, Source::Unsplash, Source::Favorites];
 
     pub fn id(self) -> &'static str {
         match self {
             Source::Wallhaven => "wallhaven",
             Source::Unsplash => "unsplash",
+            Source::Favorites => "favorites",
         }
     }
 
@@ -37,6 +39,7 @@ impl Source {
         match self {
             Source::Wallhaven => "Wallhaven",
             Source::Unsplash => "Unsplash",
+            Source::Favorites => "Favorites",
         }
     }
 
@@ -52,6 +55,7 @@ impl Source {
         match self {
             Source::Wallhaven => wallhaven::candidates(wallhaven).await,
             Source::Unsplash => unsplash::candidates(unsplash).await,
+            Source::Favorites => crate::favorites::candidates(),
         }
     }
 }

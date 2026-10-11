@@ -26,6 +26,14 @@ template $ValhallaWindow : Adw.ApplicationWindow {
         }
 
         [end]
+        Gtk.Button like_button {
+          action-name: "win.toggle-favorite";
+          icon-name: "emblem-favorite-symbolic";
+          tooltip-text: _("Add to Favorites");
+          styles ["flat", "suggested-action"]
+        }
+
+        [end]
         Gtk.Stack refresh_stack {
           transition-type: crossfade;
 

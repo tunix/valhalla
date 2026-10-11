@@ -31,6 +31,8 @@ pub enum Trigger {
 pub enum Msg {
     Busy,
     WallpaperSet {
+        /// Candidate id — the heart toggle's like key.
+        id: String,
         path: std::path::PathBuf,
         source: &'static str,
         title: Option<String>,
@@ -333,7 +335,15 @@ impl Core {
 
         let mut chosen: Option<(crate::source::Candidate, std::path::PathBuf)> = None;
         for c in pool.iter().take(8) {
-            match http::download_image(&c.image_url, &http::wallpapers_dir()).await {
+            // Favorites candidates point at local copies (file:// URLs) —
+            // no download; the copy is applied directly.
+            let path: Result<std::path::PathBuf, String> =
+                if let Some(local) = c.image_url.strip_prefix("file://") {
+                    Ok(std::path::PathBuf::from(local))
+                } else {
+                    http::download_image(&c.image_url, &http::wallpapers_dir()).await
+                };
+            match path {
                 Ok(p) => {
                     chosen = Some((c.clone(), p));
                     break;
@@ -403,6 +413,7 @@ impl Core {
             Ok(()) => {
                 tracing::info!(?kind, "wallpaper applied");
                 self.send(Msg::WallpaperSet {
+                    id: cand.id.clone(),
                     path,
                     source: source.id(),
                     title: cand.title.clone(),
@@ -419,8 +430,15 @@ impl Core {
         c: &crate::source::Candidate,
         threshold: f32,
     ) -> Result<ColorScheme, String> {
-        let thumb = http::download_cached(&c.thumb_url, &http::thumbs_dir()).await?;
-        let bytes = std::fs::read(&thumb).map_err(|e| e.to_string())?;
+        // Favorites point at local copies (file://); read directly instead
+        // of routing through the HTTP cache.
+        let bytes = match c.thumb_url.strip_prefix("file://") {
+            Some(local) => std::fs::read(local).map_err(|e| e.to_string())?,
+            None => {
+                let thumb = http::download_cached(&c.thumb_url, &http::thumbs_dir()).await?;
+                std::fs::read(&thumb).map_err(|e| e.to_string())?
+            }
+        };
         let analysis = brightness::analyze(&bytes)?;
         Ok(brightness::classify(&analysis, threshold))
     }
@@ -513,6 +531,7 @@ mod tests {
         let msgs = [
             Msg::Busy,
             Msg::WallpaperSet {
+                id: "w1".into(),
                 path: "/w.jpg".into(),
                 source: "wallhaven",
                 title: Some("T".into()),
@@ -527,6 +546,7 @@ mod tests {
         }
         // WallpaperSet carries the full metadata for the window caption.
         if let Msg::WallpaperSet {
+            id,
             path,
             source,
             title,
@@ -534,6 +554,7 @@ mod tests {
             scheme,
         } = &msgs[1]
         {
+            assert_eq!(id, "w1");
             assert_eq!(path, &std::path::PathBuf::from("/w.jpg"));
             assert_eq!(*source, "wallhaven");
             assert_eq!(title.as_deref(), Some("T"));

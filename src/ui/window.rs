@@ -15,8 +15,22 @@ glib::wrapper! {
         @implements gio::ActionGroup, gio::ActionMap, gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget, gtk::Native, gtk::Root, gtk::ShortcutManager;
 }
 
+/// The wallpaper currently previewed in the window — the heart toggle's
+/// subject. `scheme` is captured at apply-time.
+#[derive(Debug, Clone)]
+pub struct CurrentWallpaper {
+    pub id: String,
+    pub source: &'static str,
+    pub path: std::path::PathBuf,
+    pub title: Option<String>,
+    pub author: Option<String>,
+    pub scheme: ColorScheme,
+}
+
 mod imp {
     use std::{cell::RefCell, sync::OnceLock};
+
+    use super::CurrentWallpaper;
 
     use adw::subclass::prelude::*;
     use gtk::{gio, glib, TemplateChild};
@@ -39,10 +53,15 @@ mod imp {
         pub wallpaper_picture: TemplateChild<gtk::Picture>,
         #[template_child]
         pub info_label: TemplateChild<gtk::Label>,
+        #[template_child]
+        pub like_button: TemplateChild<gtk::Button>,
 
         pub settings: OnceLock<gio::Settings>,
         pub trig: OnceLock<mpsc::UnboundedSender<Trigger>>,
         pub dropdown: RefCell<Option<gtk::DropDown>>,
+        /// The wallpaper currently previewed (path + id + source), so the heart
+        /// toggle knows what to like/unlike. None = nothing liked-able yet.
+        pub current_wallpaper: RefCell<Option<CurrentWallpaper>>,
     }
 
     #[glib::object_subclass]
@@ -87,7 +106,30 @@ impl Window {
         window.watch_settings();
         window.update_banner();
         window.restore_preview();
+        window.update_heart();
         window
+    }
+
+    /// Reflect favorite state on the heart button: filled red when liked,
+    /// outline otherwise. No-op when nothing is previewed.
+    fn update_heart(&self) {
+        let imp = self.imp();
+        let liked = imp
+            .current_wallpaper
+            .borrow()
+            .as_ref()
+            .map(|w| crate::favorites::contains(&w.id))
+            .unwrap_or(false);
+        let button = imp.like_button.get();
+        if liked {
+            button.set_icon_name("emblem-favorite-symbolic");
+            button.add_css_class("liked");
+            button.set_tooltip_text(Some("Remove from Favorites"));
+        } else {
+            button.set_icon_name("emblem-favorite-symbolic");
+            button.remove_css_class("liked");
+            button.set_tooltip_text(Some("Add to Favorites"));
+        }
     }
 
     fn imp(&self) -> &imp::Window {
@@ -121,6 +163,35 @@ impl Window {
 
     fn setup_actions(&self) {
         let imp = self.imp();
+
+        let toggle_favorite = gio::SimpleAction::new("toggle-favorite", None);
+        let win_fav = self.downgrade();
+        toggle_favorite.connect_activate(move |_, _| {
+            let Some(window) = win_fav.upgrade() else {
+                return;
+            };
+            let imp = window.imp();
+            let Some(current) = imp.current_wallpaper.borrow().clone() else {
+                return; // nothing to like yet
+            };
+            let result = if crate::favorites::contains(&current.id) {
+                crate::favorites::remove(&current.id)
+            } else {
+                crate::favorites::add(
+                    &current.id,
+                    current.source,
+                    &current.path,
+                    current.title.clone(),
+                    current.author.clone(),
+                    Some(current.scheme),
+                )
+            };
+            if let Err(e) = result {
+                imp.toast_overlay.add_toast(adw::Toast::new(&e));
+            }
+            window.update_heart();
+        });
+        self.add_action(&toggle_favorite);
 
         let refresh = gio::SimpleAction::new("refresh", None);
         let trig = imp.trig.get().unwrap().clone();
@@ -219,6 +290,24 @@ impl Window {
             return;
         }
         imp.wallpaper_picture.set_filename(Some(&path));
+        // Heart toggle subject on restored preview too (scheme label comes
+        // from state; source is the entry's source).
+        let scheme = state.scheme.as_deref().map(|s| {
+            if s == "dark" {
+                ColorScheme::Dark
+            } else {
+                ColorScheme::Light
+            }
+        });
+        *imp.current_wallpaper.borrow_mut() = Some(CurrentWallpaper {
+            id: entry.id.clone(),
+            source: "wallhaven", // best-effort label; favorites lookups are by id
+            path: path.clone(),
+            title: entry.title.clone(),
+            author: entry.author.clone(),
+            scheme: scheme.unwrap_or(ColorScheme::Light),
+        });
+        self.update_heart();
         let mut text = entry.source.clone();
         if let Some(author) = &entry.author {
             text.push_str(&format!(" · by {author}"));
@@ -237,6 +326,7 @@ impl Window {
                 imp.info_label.set_text("Fetching a new wallpaper…");
             }
             Msg::WallpaperSet {
+                id,
                 path,
                 source,
                 title,
@@ -245,6 +335,15 @@ impl Window {
             } => {
                 imp.refresh_stack.set_visible_child_name("button");
                 imp.wallpaper_picture.set_filename(Some(&path));
+                // Heart toggle subject: the freshly applied wallpaper.
+                *imp.current_wallpaper.borrow_mut() = Some(CurrentWallpaper {
+                    id,
+                    source,
+                    path: path.clone(),
+                    title: title.clone(),
+                    author: author.clone(),
+                    scheme,
+                });
                 let mut parts: Vec<String> = vec![source.to_string()];
                 if let Some(author) = author.as_deref().filter(|a| !a.is_empty()) {
                     parts.push(format!("by {author}"));
@@ -260,6 +359,7 @@ impl Window {
                     .to_string(),
                 );
                 imp.info_label.set_text(&parts.join(" · "));
+                self.update_heart();
             }
             Msg::Failed(err) => {
                 imp.refresh_stack.set_visible_child_name("button");
