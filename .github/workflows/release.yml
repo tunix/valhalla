@@ -106,8 +106,10 @@ jobs:
       # publication because immutable releases reject late asset uploads.
       - name: Upload release artifacts
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        env:
+          TAG: ${{ inputs.tag || needs.release-please.outputs.tag_name }}
         with:
-          tag_name: ${{ env.TAG }}
+          tag_name: ${{ env.TAG }} # step-level env: dispatch'te needs boşken inputs.tag geçer
           draft: true
           files: valhalla-*-${{ matrix.arch }}.tar.gz
 
@@ -166,6 +168,9 @@ jobs:
       # late asset uploads).
       - name: Attach bundle to the draft release
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        env:
+          # Dispatch runs skip release-please; inputs.tag must win there.
+          TAG: ${{ inputs.tag || needs.release-please.outputs.tag_name }}
         with:
           tag_name: ${{ env.TAG }}
           draft: true
@@ -273,6 +278,9 @@ jobs:
 
       - name: Upload release artifacts
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        env:
+          # Dispatch runs skip release-please; inputs.tag must win there.
+          TAG: ${{ inputs.tag || needs.release-please.outputs.tag_name }}
         with:
           tag_name: ${{ env.TAG }}
           draft: true
