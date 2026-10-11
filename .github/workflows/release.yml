@@ -99,7 +99,6 @@ jobs:
       - name: Package tarball
         run: |
           install -D -m 0755 target/release/valhalla "valhalla-${TAG}/valhalla"
-          install -D -m 0644 data/valhalla.service "valhalla-${TAG}/data/valhalla.service"
           tar -czf "valhalla-${TAG}-${ARCH}.tar.gz" "valhalla-${TAG}"
 
       # The release is created as a draft by release-please (see
@@ -260,6 +259,7 @@ jobs:
         run: |
           set -eu
           VERSION="${TAG#v}"
+          export VERSION
           ./appimagetool --appimage-extract-and-run AppDir \
             "valhalla-${VERSION}-${ARCH}.AppImage" \
             -u "gh-releases-zsync|tunix|valhalla|latest|valhalla-*-${ARCH}.AppImage.zsync"
@@ -267,6 +267,7 @@ jobs:
       - name: Validate AppImage
         run: |
           set -eu
+          VERSION="${TAG#v}" # job env: TAG; step-local VERSION
           ./"valhalla-${VERSION}-${ARCH}.AppImage" --appimage-extract >/dev/null
           test -f squashfs-root/usr/bin/valhalla
 
