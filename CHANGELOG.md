@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.0.1](https://github.com/tunix/valhalla/compare/v1.0.0...v1.0.1) (2026-10-11)
+
+
+### Bug Fixes
+
+* **ci:** release pipeline after systemd removal + AppImage VERSION scope ([#45](https://github.com/tunix/valhalla/issues/45)) ([fa0c8e5](https://github.com/tunix/valhalla/commit/fa0c8e52784c359a6b155cadb39ecb26bc75cb1c))
+* **ci:** step-level TAG env on release uploads (dispatch path) ([#47](https://github.com/tunix/valhalla/issues/47)) ([b6ddf61](https://github.com/tunix/valhalla/commit/b6ddf6123cf157a6b42b129bc6c1188dd658afae))
+* **ci:** tag_name as direct expression in release upload steps ([#48](https://github.com/tunix/valhalla/issues/48)) ([7ce847d](https://github.com/tunix/valhalla/commit/7ce847da1cf739e2dd3bd4534b3b141782cab18a))
+
 ## [1.0.0](https://github.com/tunix/valhalla/compare/v0.5.1...v1.0.0) (2026-10-10)
 
 
