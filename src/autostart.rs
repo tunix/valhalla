@@ -147,11 +147,10 @@ mod tests {
 
         std::env::remove_var("XDG_CONFIG_HOME");
         let _ = std::fs::remove_dir_all(&dir);
-    }
 
-    #[test]
-    fn exec_command_in_appimage_mode() {
-        // Fake an AppImage runtime: $APPIMAGE pointing at a real file.
+        // 7) Exec resolution per packaging mode (same thread: APPIMAGE is
+        // process-global and parallel tests would race the env).
+        // 7a) AppImage mode: $APPIMAGE pointing at a real file
         let fake =
             std::env::temp_dir().join(format!("fake-appimage-{}.AppImage", std::process::id()));
         std::fs::write(&fake, b"magma").unwrap();
@@ -162,10 +161,8 @@ mod tests {
         // Quoted path + daemon flag.
         assert!(cmd.starts_with('"'), "path must be quoted: {cmd}");
         assert!(cmd.ends_with("\" --daemon"), "cmd: {cmd}");
-    }
 
-    #[test]
-    fn exec_command_nonexistent_appimage_falls_back() {
+        // 7b) AppImage path not a real file -> PATH fallback
         std::env::set_var("APPIMAGE", "/nonexistent/path.AppImage");
         let cmd = exec_command();
         std::env::remove_var("APPIMAGE");
