@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/tunix/valhalla/compare/v1.0.1...v1.1.0) (2026-10-12)
+
+
+### Features
+
+* **ui:** favorites source + heart toggle ([#49](https://github.com/tunix/valhalla/issues/49)) ([3972629](https://github.com/tunix/valhalla/commit/3972629f77a7ed7b5171b4b48a3c2f34cb93f2e2))
+
 ## [1.0.1](https://github.com/tunix/valhalla/compare/v1.0.0...v1.0.1) (2026-10-11)
 
 
