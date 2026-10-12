@@ -7,6 +7,7 @@ mod credentials;
 mod favorites;
 mod fit;
 mod http;
+mod manual;
 mod scheduler;
 mod screen;
 mod source;

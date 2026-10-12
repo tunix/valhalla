@@ -36,6 +36,11 @@
       <summary>Refresh on startup</summary>
       <description>Download a fresh wallpaper when the app or daemon starts. Off by default.</description>
     </key>
+    <key name="manual-paths" type="s">
+      <default>""</default>
+      <summary>Manual wallpaper paths</summary>
+      <description>Newline-separated absolute paths picked by the user (files or expanded directory contents).</description>
+    </key>
     <key name="start-at-login" type="b">
       <default>false</default>
       <summary>Start the daemon at login</summary>
