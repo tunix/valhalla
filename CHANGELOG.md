@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/tunix/valhalla/compare/v1.1.0...v1.2.0) (2026-10-12)
+
+
+### Features
+
+* **ui:** manual wallpaper source — pick files or a folder ([#53](https://github.com/tunix/valhalla/issues/53)) ([7f051b3](https://github.com/tunix/valhalla/commit/7f051b3f8be36354191cc05893ef927d5497f99b))
+
 ## [1.1.0](https://github.com/tunix/valhalla/compare/v1.0.1...v1.1.0) (2026-10-12)
 
 
