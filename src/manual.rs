@@ -6,8 +6,6 @@
 use gio::prelude::*;
 use std::path::{Path, PathBuf};
 
-
-
 /// Settings key storing the picked paths (newline-separated). GSettings
 /// string arrays would be nicer but a plain string survives the simple
 /// schema and the few-path scale we target.
@@ -243,7 +241,8 @@ mod tests {
         assert_eq!(read, vec![p1, p2]);
 
         // whitespace/empty lines in the stored string are skipped
-        s.set_string(PATHS_KEY, "\n/tmp/a.jpg\n\n/tmp/b.jpg\n").unwrap();
+        s.set_string(PATHS_KEY, "\n/tmp/a.jpg\n\n/tmp/b.jpg\n")
+            .unwrap();
         let read = paths_with(&s);
         assert_eq!(read.len(), 2, "empty lines must be skipped");
     }
