@@ -22,16 +22,23 @@ pub enum Source {
     Wallhaven,
     Unsplash,
     Favorites,
+    Manual,
 }
 
 impl Source {
-    pub const ALL: [Source; 3] = [Source::Wallhaven, Source::Unsplash, Source::Favorites];
+    pub const ALL: [Source; 4] = [
+        Source::Wallhaven,
+        Source::Unsplash,
+        Source::Favorites,
+        Source::Manual,
+    ];
 
     pub fn id(self) -> &'static str {
         match self {
             Source::Wallhaven => "wallhaven",
             Source::Unsplash => "unsplash",
             Source::Favorites => "favorites",
+            Source::Manual => "manual",
         }
     }
 
@@ -40,6 +47,7 @@ impl Source {
             Source::Wallhaven => "Wallhaven",
             Source::Unsplash => "Unsplash",
             Source::Favorites => "Favorites",
+            Source::Manual => "Manual",
         }
     }
 
@@ -56,6 +64,7 @@ impl Source {
             Source::Wallhaven => wallhaven::candidates(wallhaven).await,
             Source::Unsplash => unsplash::candidates(unsplash).await,
             Source::Favorites => crate::favorites::candidates(),
+            Source::Manual => crate::manual::candidates(),
         }
     }
 }
