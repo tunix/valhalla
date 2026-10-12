@@ -48,6 +48,9 @@ pub fn build(settings: &gio::Settings) -> adw::PreferencesDialog {
     let (un_page, un_key_row) = unsplash_page(settings);
     dialog.add(&un_page);
 
+    let manual_page = manual_page(settings);
+    dialog.add(&manual_page);
+
     // Load stored keys from the keyring off the main thread.
     let (tx, rx) = async_channel::unbounded::<(Option<String>, Option<String>)>();
     crate::tokio_handle().spawn(async move {
@@ -305,6 +308,138 @@ fn wallhaven_page(
     }
 
     (page, api_key, nsfw, purity)
+}
+
+
+/// Manual source page: pick individual files and/or a directory (all images
+/// inside are added). The selected set is listed and removable.
+fn manual_page(settings: &gio::Settings) -> adw::PreferencesPage {
+    use adw::prelude::*;
+
+    let page = adw::PreferencesPage::new();
+    page.set_title("Manual");
+    page.set_icon_name(Some("folder-pictures-symbolic"));
+
+    let group = adw::PreferencesGroup::new();
+    group.set_title("Your wallpapers");
+    group.set_description(Some("Files and folders cycle with the theme-matching engine; stored locally, used offline."));
+    page.add(&group);
+
+    // Pick buttons row
+    let pick_box = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    let pick_files = gtk::Button::with_label("Add files…");
+    pick_files.add_css_class("suggested-action");
+    let pick_dir = gtk::Button::with_label("Add folder…");
+    pick_dir.add_css_class("flat");
+    pick_box.append(&pick_files);
+    pick_box.append(&pick_dir);
+    group.add(&pick_box);
+
+    // List of selected paths (refreshed on change)
+    let list_box = gtk::Box::new(gtk::Orientation::Vertical, 4);
+    group.add(&list_box);
+
+    let rebuild_list = {
+        let list_box = list_box.clone();
+        move || {
+            while let Some(child) = list_box.first_child() {
+                list_box.remove(&child);
+            }
+            for p in crate::manual::paths() {
+                let row = adw::ActionRow::new();
+                let name = p
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("<path>")
+                    .to_string();
+                let is_dir = p.is_dir();
+                row.set_title(&name);
+                row.set_subtitle(&p.to_string_lossy());
+                let icon = if is_dir { "folder-symbolic" } else { "image-x-generic-symbolic" };
+                row.add_prefix(&gtk::Image::from_icon_name(icon));
+                let remove_btn = gtk::Button::from_icon_name("user-trash-symbolic");
+                remove_btn.add_css_class("flat");
+                remove_btn.set_tooltip_text(Some("Remove"));
+                let p_c = p.clone();
+                remove_btn.connect_clicked(move |_| {
+                    if let Err(e) = crate::manual::remove(&p_c) {
+                        tracing::warn!("manual remove failed: {e}");
+                    }
+                    // Rebuild happens via the paths watcher below.
+                });
+                row.add_suffix(&remove_btn);
+                list_box.append(&row);
+            }
+            if crate::manual::paths().is_empty() {
+                let empty = gtk::Label::new(Some("Nothing selected yet"));
+                empty.add_css_class("dimmed");
+                list_box.append(&empty);
+            }
+        }
+    };
+
+    // File chooser: files (multi-select)
+    {
+        let rebuild = rebuild_list.clone();
+        pick_files.connect_clicked(move |_| {
+            let dialog = gtk::FileDialog::new();
+            dialog.set_title("Pick wallpapers");
+            let rebuild = rebuild.clone();
+            dialog.open_multiple(None::<&gtk::Window>, gio::Cancellable::NONE, move |result| {
+                let Ok(files) = result else { return };
+                let paths: Vec<std::path::PathBuf> = (0..files.n_items())
+                    .filter_map(|i| files.item(i))
+                    .filter_map(|obj| obj.downcast::<gio::File>().ok())
+                    .filter_map(|f| f.path())
+                    .collect();
+                if paths.is_empty() { return; }
+                let rebuild = rebuild.clone();
+                crate::tokio_handle().spawn_blocking(move || {
+                    if let Err(e) = crate::manual::add(&paths) {
+                        tracing::warn!("manual add failed: {e}");
+                    }
+                });
+                // Rebuild after the blocking write completes.
+                glib::spawn_future_local(async move {
+                    rebuild();
+                });
+            });
+        });
+    }
+
+    // Folder chooser: expands to all images inside (one level)
+    {
+        let rebuild = rebuild_list.clone();
+        pick_dir.connect_clicked(move |_| {
+            let dialog = gtk::FileDialog::new();
+            dialog.set_title("Pick a folder of wallpapers");
+            let rebuild = rebuild.clone();
+            dialog.select_folder(None::<&gtk::Window>, gio::Cancellable::NONE, move |result| {
+                let Ok(file) = result else { return };
+                let Some(path) = file.path() else { return };
+                let rebuild = rebuild.clone();
+                crate::tokio_handle().spawn_blocking(move || {
+                    if let Err(e) = crate::manual::add(&[path]) {
+                        tracing::warn!("manual folder add failed: {e}");
+                    }
+                });
+                glib::spawn_future_local(async move {
+                    rebuild();
+                });
+            });
+        });
+    }
+
+    // Initial fill + refresh after any change (paths watcher)
+    rebuild_list();
+    {
+        let rebuild = rebuild_list.clone();
+        settings.connect_changed(Some("manual-paths"), move |_, _| {
+            rebuild();
+        });
+    }
+
+    page
 }
 
 fn unsplash_page(settings: &gio::Settings) -> (adw::PreferencesPage, adw::EntryRow) {
