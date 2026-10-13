@@ -28,8 +28,8 @@ pub async fn candidates(cfg: &PixabayCfg) -> Result<Vec<Candidate>, String> {
     };
 
     // Tests point this at a local stub server; see wallhaven.rs.
-    let base = std::env::var("VALHALLA_PIXABAY_URL")
-        .unwrap_or_else(|_| "https://pixabay.com/api/".into());
+    let base =
+        std::env::var("VALHALLA_PIXABAY_URL").unwrap_or_else(|_| "https://pixabay.com/api/".into());
     let mut url = reqwest::Url::parse(&base).map_err(|e| e.to_string())?;
     {
         let mut qp = url.query_pairs_mut();
@@ -72,10 +72,7 @@ pub async fn candidates(cfg: &PixabayCfg) -> Result<Vec<Candidate>, String> {
     let response = response
         .error_for_status()
         .map_err(|e| format!("pixabay: {e}"))?;
-    let parsed: SearchResponse = response
-        .json()
-        .await
-        .map_err(|e| format!("pixabay: {e}"))?;
+    let parsed: SearchResponse = response.json().await.map_err(|e| format!("pixabay: {e}"))?;
 
     Ok(parsed
         .hits
@@ -162,7 +159,10 @@ mod tests {
         }]}"#;
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
-        std::env::set_var("VALHALLA_PIXABAY_URL", format!("http://127.0.0.1:{port}/api/"));
+        std::env::set_var(
+            "VALHALLA_PIXABAY_URL",
+            format!("http://127.0.0.1:{port}/api/"),
+        );
         let server = std::thread::spawn(move || {
             let (stream, _) = listener.accept().unwrap();
             let mut reader = std::io::BufReader::new(&stream);
@@ -204,7 +204,10 @@ mod tests {
         let guard = Guard;
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
-        std::env::set_var("VALHALLA_PIXABAY_URL", format!("http://127.0.0.1:{port}/api/"));
+        std::env::set_var(
+            "VALHALLA_PIXABAY_URL",
+            format!("http://127.0.0.1:{port}/api/"),
+        );
         let server = std::thread::spawn(move || {
             let (stream, _) = listener.accept().unwrap();
             let mut reader = std::io::BufReader::new(&stream);

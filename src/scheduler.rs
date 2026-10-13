@@ -290,13 +290,7 @@ impl Core {
                 let px_relaxed = config::pexels(&self.settings, px_key, Some(relaxed));
                 let pb_relaxed = config::pixabay(&self.settings, pb_key, Some(relaxed));
                 match source
-                    .candidates(
-                        &wh_relaxed,
-                        &un_relaxed,
-                        &px_relaxed,
-                        &pb_relaxed,
-                        nasa_key,
-                    )
+                    .candidates(&wh_relaxed, &un_relaxed, &px_relaxed, &pb_relaxed, nasa_key)
                     .await
                 {
                     Ok(c) if !c.is_empty() => candidates = c,

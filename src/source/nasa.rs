@@ -57,10 +57,7 @@ pub async fn candidates(api_key: Option<String>) -> Result<Vec<Candidate>, Strin
     let response = response
         .error_for_status()
         .map_err(|e| format!("nasa: {e}"))?;
-    let parsed: SearchResponse = response
-        .json()
-        .await
-        .map_err(|e| format!("nasa: {e}"))?;
+    let parsed: SearchResponse = response.json().await.map_err(|e| format!("nasa: {e}"))?;
 
     Ok(parsed
         .collection
@@ -79,10 +76,7 @@ pub async fn candidates(api_key: Option<String>) -> Result<Vec<Candidate>, Strin
                 source: "nasa",
                 image_url,
                 thumb_url: thumb,
-                web_url: format!(
-                    "https://images.nasa.gov/details/{}",
-                    item.nasa_id
-                ),
+                web_url: format!("https://images.nasa.gov/details/{}", item.nasa_id),
                 title: item.title,
                 author: item.photographer.or(item.center),
                 dominant_colors: Vec::new(),

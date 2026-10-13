@@ -108,7 +108,10 @@ mod tests {
         let _guard = Guard;
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
-        std::env::set_var("VALHALLA_BING_URL", format!("http://127.0.0.1:{port}/HPImageArchive.aspx"));
+        std::env::set_var(
+            "VALHALLA_BING_URL",
+            format!("http://127.0.0.1:{port}/HPImageArchive.aspx"),
+        );
         let _server = std::thread::spawn(move || {
             let (stream, _) = listener.accept().unwrap();
             let mut reader = std::io::BufReader::new(&stream);
