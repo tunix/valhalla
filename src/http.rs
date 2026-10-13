@@ -85,6 +85,26 @@ pub async fn download_image(url: &str, dir: &Path) -> Result<PathBuf, String> {
     Ok(dest)
 }
 
+/// Shared primitives for tests that mutate process-global state.
+#[cfg(test)]
+pub(crate) mod test_env {
+    use std::sync::Mutex;
+
+    /// `cargo test` runs tests on parallel threads while `std::env` is a
+    /// process-global. The stub-server tests point `candidates()` at a local
+    /// server via an env var, and two tests racing on the SAME var can make
+    /// one test's client connect to the other test's single-accept stub: the
+    /// losing test's own server then never receives a connection and its
+    /// `server.join().unwrap()` blocks in `accept()` forever. The HTTP
+    /// client's timeouts do not help — the hang is in `join()`, after the
+    /// request (run 38458597143: pixabay's `local_api_maps_hits` hung for
+    /// 27 minutes this way). Serialize every env-mutating test behind this
+    /// lock: acquire it BEFORE touching the var and hold it to the end of
+    /// the test, so the existing Drop guards clean the var up before the
+    /// lock is released (bindings drop in reverse declaration order).
+    pub(crate) static ENV_LOCK: Mutex<()> = Mutex::new(());
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
