@@ -38,7 +38,8 @@ const CONTENT_FILTER_LABELS: [&str; 2] = ["Low (moderate)", "High (strict)"];
 /// Build the preferences dialog for the given settings.
 pub fn build(settings: &gio::Settings) -> adw::PreferencesDialog {
     let dialog = adw::PreferencesDialog::new();
-    dialog.set_search_enabled(false);
+    // 8 pages: HIG recommends enabling search once the sidebar grows.
+    dialog.set_search_enabled(true);
 
     dialog.add(&general_page(settings));
 
@@ -48,39 +49,71 @@ pub fn build(settings: &gio::Settings) -> adw::PreferencesDialog {
     let (un_page, un_key_row) = unsplash_page(settings);
     dialog.add(&un_page);
 
+    let (px_page, px_key_row) = pexels_page(settings);
+    dialog.add(&px_page);
+
+    let (pb_page, pb_key_row) = pixabay_page(settings);
+    dialog.add(&pb_page);
+
+    dialog.add(&bing_page());
+    let nasa_key_row = adw::EntryRow::new();
+    nasa_key_row.set_title("API key (optional)");
+    nasa_key_row.set_show_apply_button(true);
+    let nasa_row_weak = nasa_key_row.downgrade();
+    nasa_key_row.connect_apply(move |row| {
+        let text = row.text().to_string();
+        let h = crate::tokio_handle().clone();
+        h.spawn_blocking(move || {
+            if text.is_empty() {
+                credentials::clear("nasa");
+            } else if let Err(e) = credentials::set("nasa", &text) {
+                tracing::warn!("failed to store key: {e}");
+            }
+        });
+    });
+    dialog.add(&nasa_page(nasa_key_row.clone()));
+
     let manual_page = manual_page(settings);
     dialog.add(&manual_page);
 
     // Load stored keys from the keyring off the main thread.
     let (tx, rx) = async_channel::unbounded::<(Option<String>, Option<String>)>();
-    crate::tokio_handle().spawn(async move {
-        let wh = crate::tokio_handle()
-            .spawn_blocking(|| credentials::get("wallhaven"))
-            .await
-            .ok()
-            .flatten();
-        let un = crate::tokio_handle()
-            .spawn_blocking(|| credentials::get("unsplash"))
-            .await
-            .ok()
-            .flatten();
-        let _ = tx.send((wh, un)).await;
-    });
+    for source in ["wallhaven", "unsplash", "pexels", "pixabay", "nasa"] {
+        let tx = tx.clone();
+        crate::tokio_handle().spawn(async move {
+            let key = crate::tokio_handle()
+                .spawn_blocking(move || credentials::get(source))
+                .await
+                .ok()
+                .flatten();
+            let _ = tx.send((Some(source.to_string()), key)).await;
+        });
+    }
+    drop(tx);
     let wh_weak = wh_key_row.downgrade();
     let un_weak = un_key_row.downgrade();
+    let px_weak = px_key_row.downgrade();
+    let pb_weak = pb_key_row.downgrade();
+    let nasa_weak = nasa_row_weak.clone();
     let nsfw_weak = nsfw_row.downgrade();
     glib::spawn_future_local(async move {
-        while let Ok((wh, un)) = rx.recv().await {
-            if let Some(key) = wh {
-                if let Some(row) = wh_weak.upgrade() {
-                    row.set_text(&key);
-                }
+        while let Ok((source, key)) = rx.recv().await {
+            let Some(key) = key else { continue };
+            let row = match source.as_deref().unwrap_or("") {
+                "wallhaven" => wh_weak.upgrade(),
+                "unsplash" => un_weak.upgrade(),
+                "pexels" => px_weak.upgrade(),
+                "pixabay" => pb_weak.upgrade(),
+                "nasa" => nasa_weak.upgrade(),
+                _ => None,
+            };
+            if let Some(row) = row {
+                row.set_text(&key);
+            }
+            if source.as_deref() == Some("wallhaven") {
                 if let Some(row) = nsfw_weak.upgrade() {
                     row.set_sensitive(true);
                 }
-            }
-            if let (Some(key), Some(row)) = (un, un_weak.upgrade()) {
-                row.set_text(&key);
             }
         }
     });
@@ -308,6 +341,121 @@ fn wallhaven_page(
     }
 
     (page, api_key, nsfw, purity)
+}
+
+fn pexels_page(settings: &gio::Settings) -> (adw::PreferencesPage, adw::EntryRow) {
+    let page = adw::PreferencesPage::new();
+    page.set_title("Pexels");
+    page.set_icon_name(Some("applications-internet-symbolic"));
+
+    let api_group = adw::PreferencesGroup::new();
+    api_group.set_title("API");
+    page.add(&api_group);
+
+    let api_key = adw::EntryRow::new();
+    api_key.set_title("API key");
+    api_key.set_show_apply_button(true);
+    api_group.add(&api_key);
+
+    let search_group = adw::PreferencesGroup::new();
+    search_group.set_title("Search");
+    page.add(&search_group);
+
+    let query = adw::EntryRow::new();
+    query.set_title("Query");
+    settings.bind("pexels-query", &query, "text").build();
+    search_group.add(&query);
+
+    api_key.connect_apply(move |row| {
+        let text = row.text().to_string();
+        let h = crate::tokio_handle().clone();
+        h.spawn_blocking(move || {
+            if text.is_empty() {
+                credentials::clear("pexels");
+            } else if let Err(e) = credentials::set("pexels", &text) {
+                tracing::warn!("failed to store key: {e}");
+            }
+        });
+    });
+
+    (page, api_key)
+}
+
+fn pixabay_page(settings: &gio::Settings) -> (adw::PreferencesPage, adw::EntryRow) {
+    let page = adw::PreferencesPage::new();
+    page.set_title("Pixabay");
+    page.set_icon_name(Some("applications-internet-symbolic"));
+
+    let api_group = adw::PreferencesGroup::new();
+    api_group.set_title("API");
+    page.add(&api_group);
+
+    let api_key = adw::EntryRow::new();
+    api_key.set_title("API key");
+    api_key.set_show_apply_button(true);
+    api_group.add(&api_key);
+
+    let search_group = adw::PreferencesGroup::new();
+    search_group.set_title("Search");
+    page.add(&search_group);
+
+    let query = adw::EntryRow::new();
+    query.set_title("Query");
+    settings.bind("pixabay-query", &query, "text").build();
+    search_group.add(&query);
+
+    let category = adw::EntryRow::new();
+    category.set_title("Category");
+    category.set_tooltip_text(Some("Optional Pixabay category, e.g. nature, backgrounds"));
+    settings.bind("pixabay-category", &category, "text").build();
+    search_group.add(&category);
+
+    api_key.connect_apply(move |row| {
+        let text = row.text().to_string();
+        let h = crate::tokio_handle().clone();
+        h.spawn_blocking(move || {
+            if text.is_empty() {
+                credentials::clear("pixabay");
+            } else if let Err(e) = credentials::set("pixabay", &text) {
+                tracing::warn!("failed to store key: {e}");
+            }
+        });
+    });
+
+    (page, api_key)
+}
+
+/// Bing's daily wallpaper needs no settings; the page explains that.
+fn bing_page() -> adw::PreferencesPage {
+    let page = adw::PreferencesPage::new();
+    page.set_title("Bing");
+    page.set_icon_name(Some("applications-internet-symbolic"));
+
+    let group = adw::PreferencesGroup::new();
+    group.set_title("Daily wallpaper");
+    group.set_description(Some(
+        "Bing's featured daily image needs no configuration. The archive keeps the last 8 days, so refreshes stay varied.",
+    ));
+    page.add(&group);
+
+    page
+}
+
+/// NASA imagery: optional key (demo access works without one).
+fn nasa_page(key_row: adw::EntryRow) -> adw::PreferencesPage {
+    let page = adw::PreferencesPage::new();
+    page.set_title("NASA");
+    page.set_icon_name(Some("applications-internet-symbolic"));
+
+    let api_group = adw::PreferencesGroup::new();
+    api_group.set_title("API");
+    api_group.set_description(Some(
+        "Optional: a free key from api.nasa.gov lifts the rate limit. Leave empty for limited demo access.",
+    ));
+    page.add(&api_group);
+    api_group.add(&key_row);
+
+    page
 }
 
 /// Manual source page: pick individual files and/or a directory (all images

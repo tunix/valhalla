@@ -54,6 +54,9 @@ const REFRESH_KEYS: &[&str] = &[
     "unsplash-query",
     "unsplash-orientation",
     "unsplash-content-filter",
+    "pexels-query",
+    "pixabay-query",
+    "pixabay-category",
 ];
 
 pub fn is_source_key(key: &str) -> bool {
@@ -229,7 +232,7 @@ impl Core {
     async fn refresh(&self, locked: &mut LockedState<'_>, now: u64, scheme: ColorScheme) {
         let source = Source::from_id(self.settings.string("active-source").as_str())
             .unwrap_or(Source::Wallhaven);
-        let (wh_key, un_key) = {
+        let (wh_key, un_key, px_key, pb_key, nasa_key) = {
             let (tx, rx) = tokio::sync::oneshot::channel();
             crate::tokio_handle().spawn(async move {
                 let wh = tokio::task::spawn_blocking(|| credentials::get("wallhaven"))
@@ -240,15 +243,32 @@ impl Core {
                     .await
                     .ok()
                     .flatten();
-                let _ = tx.send((wh, un));
+                let px = tokio::task::spawn_blocking(|| credentials::get("pexels"))
+                    .await
+                    .ok()
+                    .flatten();
+                let pb = tokio::task::spawn_blocking(|| credentials::get("pixabay"))
+                    .await
+                    .ok()
+                    .flatten();
+                let ns = tokio::task::spawn_blocking(|| credentials::get("nasa"))
+                    .await
+                    .ok()
+                    .flatten();
+                let _ = tx.send((wh, un, px, pb, ns));
             });
             rx.await.unwrap_or_default()
         };
         let screen = config::screen_geometry(&self.settings);
         let wh_cfg = config::wallhaven(&self.settings, wh_key.clone(), screen);
         let un_cfg = config::unsplash(&self.settings, un_key.clone(), screen);
+        let px_cfg = config::pexels(&self.settings, px_key.clone(), screen);
+        let pb_cfg = config::pixabay(&self.settings, pb_key.clone(), screen);
 
-        let mut candidates = match source.candidates(&wh_cfg, &un_cfg).await {
+        let mut candidates = match source
+            .candidates(&wh_cfg, &un_cfg, &px_cfg, &pb_cfg, nasa_key.clone())
+            .await
+        {
             Ok(c) => c,
             Err(e) => {
                 self.send(Msg::Failed(format!("{}: {e}", source.title())));
@@ -267,7 +287,18 @@ impl Core {
                 let relaxed = s.relaxed();
                 let wh_relaxed = config::wallhaven(&self.settings, wh_key, Some(relaxed));
                 let un_relaxed = config::unsplash(&self.settings, un_key, Some(relaxed));
-                match source.candidates(&wh_relaxed, &un_relaxed).await {
+                let px_relaxed = config::pexels(&self.settings, px_key, Some(relaxed));
+                let pb_relaxed = config::pixabay(&self.settings, pb_key, Some(relaxed));
+                match source
+                    .candidates(
+                        &wh_relaxed,
+                        &un_relaxed,
+                        &px_relaxed,
+                        &pb_relaxed,
+                        nasa_key,
+                    )
+                    .await
+                {
                     Ok(c) if !c.is_empty() => candidates = c,
                     Ok(_) => {}
                     Err(e) => tracing::warn!("relaxed retry failed: {e}"),
