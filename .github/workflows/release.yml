@@ -344,7 +344,9 @@ jobs:
     # Tell tunix/flatpak to rebuild this app into the self-hosted OSTree repo
     # (tunix.github.io/flatpak). Runs after publish so the tag is final.
     name: Trigger tunix/flatpak update
-    needs: publish
+    # release-please must be in the needs closure for its tag_name output to
+    # be readable here; publish alone yields an empty tag in the payload.
+    needs: [publish, release-please]
     if: always() && needs.publish.result == 'success'
     runs-on: ubuntu-latest
     steps:
