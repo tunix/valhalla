@@ -1,3 +1,7 @@
+pub mod bing;
+pub mod nasa;
+pub mod pexels;
+pub mod pixabay;
 pub mod unsplash;
 pub mod wallhaven;
 
@@ -21,14 +25,22 @@ pub struct Candidate {
 pub enum Source {
     Wallhaven,
     Unsplash,
+    Pexels,
+    Pixabay,
+    Bing,
+    Nasa,
     Favorites,
     Manual,
 }
 
 impl Source {
-    pub const ALL: [Source; 4] = [
+    pub const ALL: [Source; 8] = [
         Source::Wallhaven,
         Source::Unsplash,
+        Source::Pexels,
+        Source::Pixabay,
+        Source::Bing,
+        Source::Nasa,
         Source::Favorites,
         Source::Manual,
     ];
@@ -37,6 +49,10 @@ impl Source {
         match self {
             Source::Wallhaven => "wallhaven",
             Source::Unsplash => "unsplash",
+            Source::Pexels => "pexels",
+            Source::Pixabay => "pixabay",
+            Source::Bing => "bing",
+            Source::Nasa => "nasa",
             Source::Favorites => "favorites",
             Source::Manual => "manual",
         }
@@ -46,6 +62,10 @@ impl Source {
         match self {
             Source::Wallhaven => "Wallhaven",
             Source::Unsplash => "Unsplash",
+            Source::Pexels => "Pexels",
+            Source::Pixabay => "Pixabay",
+            Source::Bing => "Bing",
+            Source::Nasa => "NASA",
             Source::Favorites => "Favorites",
             Source::Manual => "Manual",
         }
@@ -59,10 +79,17 @@ impl Source {
         &self,
         wallhaven: &crate::config::WallhavenCfg,
         unsplash: &crate::config::UnsplashCfg,
+        pexels: &crate::config::PexelsCfg,
+        pixabay: &crate::config::PixabayCfg,
+        nasa_key: Option<String>,
     ) -> Result<Vec<Candidate>, String> {
         match self {
             Source::Wallhaven => wallhaven::candidates(wallhaven).await,
             Source::Unsplash => unsplash::candidates(unsplash).await,
+            Source::Pexels => pexels::candidates(pexels).await,
+            Source::Pixabay => pixabay::candidates(pixabay).await,
+            Source::Bing => bing::candidates().await,
+            Source::Nasa => nasa::candidates(nasa_key).await,
             Source::Favorites => crate::favorites::candidates(),
             Source::Manual => crate::manual::candidates(),
         }

@@ -91,5 +91,20 @@
       <summary>Unsplash content filter</summary>
       <description>low or high content safety level.</description>
     </key>
+    <key name="pexels-query" type="s">
+      <default>""</default>
+      <summary>Pexels query</summary>
+      <description>Search terms for Pexels.</description>
+    </key>
+    <key name="pixabay-query" type="s">
+      <default>""</default>
+      <summary>Pixabay query</summary>
+      <description>Search terms for Pixabay.</description>
+    </key>
+    <key name="pixabay-category" type="s">
+      <default>""</default>
+      <summary>Pixabay category</summary>
+      <description>Optional Pixabay category filter, e.g. nature or backgrounds.</description>
+    </key>
   </schema>
 </schemalist>

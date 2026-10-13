@@ -32,6 +32,21 @@ pub struct UnsplashCfg {
     pub access_key: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct PexelsCfg {
+    pub query: String,
+    pub orientation: String,
+    pub api_key: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PixabayCfg {
+    pub query: String,
+    pub category: String,
+    pub orientation: String,
+    pub api_key: Option<String>,
+}
+
 /// Resolution and aspect ratio are always derived from the screen.
 pub fn wallhaven(
     s: &gio::Settings,
@@ -61,6 +76,33 @@ pub fn unsplash(
         orientation: screen::unsplash_orientation(sc).to_string(),
         content_filter: s.string("unsplash-content-filter").to_string(),
         access_key,
+    }
+}
+
+pub fn pexels(
+    s: &gio::Settings,
+    api_key: Option<String>,
+    screen: Option<ScreenInfo>,
+) -> PexelsCfg {
+    let sc = screen_or_default(screen);
+    PexelsCfg {
+        query: s.string("pexels-query").to_string(),
+        orientation: screen::unsplash_orientation(sc).to_string(),
+        api_key,
+    }
+}
+
+pub fn pixabay(
+    s: &gio::Settings,
+    api_key: Option<String>,
+    screen: Option<ScreenInfo>,
+) -> PixabayCfg {
+    let sc = screen_or_default(screen);
+    PixabayCfg {
+        query: s.string("pixabay-query").to_string(),
+        category: s.string("pixabay-category").to_string(),
+        orientation: screen::unsplash_orientation(sc).to_string(),
+        api_key,
     }
 }
 
