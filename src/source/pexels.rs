@@ -62,10 +62,7 @@ pub async fn candidates(cfg: &PexelsCfg) -> Result<Vec<Candidate>, String> {
     let response = response
         .error_for_status()
         .map_err(|e| format!("pexels: {e}"))?;
-    let parsed: SearchResponse = response
-        .json()
-        .await
-        .map_err(|e| format!("pexels: {e}"))?;
+    let parsed: SearchResponse = response.json().await.map_err(|e| format!("pexels: {e}"))?;
 
     Ok(parsed
         .photos
@@ -129,7 +126,7 @@ mod tests {
         let p = &r.photos[0];
         assert_eq!(p.src.original, "https://img/o.jpg");
         assert_eq!(p.photographer.as_deref(), Some("Ada"));
-        assert_eq!(p.avg_color.as_deref(), Some("#102030")); 
+        assert_eq!(p.avg_color.as_deref(), Some("#102030"));
         // ^ hex inside a raw string literal; no escaping needed
     }
 
@@ -164,7 +161,10 @@ mod tests {
         }]}"##;
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
-        std::env::set_var("VALHALLA_PEXELS_URL", format!("http://127.0.0.1:{port}/search"));
+        std::env::set_var(
+            "VALHALLA_PEXELS_URL",
+            format!("http://127.0.0.1:{port}/search"),
+        );
         let server = std::thread::spawn(move || {
             let (stream, _) = listener.accept().unwrap();
             let mut reader = std::io::BufReader::new(&stream);
@@ -208,7 +208,10 @@ mod tests {
         let guard = Guard;
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
-        std::env::set_var("VALHALLA_PEXELS_URL", format!("http://127.0.0.1:{port}/search"));
+        std::env::set_var(
+            "VALHALLA_PEXELS_URL",
+            format!("http://127.0.0.1:{port}/search"),
+        );
         let server = std::thread::spawn(move || {
             let (stream, _) = listener.accept().unwrap();
             let mut reader = std::io::BufReader::new(&stream);
@@ -230,5 +233,4 @@ mod tests {
         let err = result.unwrap_err();
         assert!(err.contains("401"), "error: {err}");
     }
-
 }

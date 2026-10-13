@@ -79,11 +79,7 @@ pub fn unsplash(
     }
 }
 
-pub fn pexels(
-    s: &gio::Settings,
-    api_key: Option<String>,
-    screen: Option<ScreenInfo>,
-) -> PexelsCfg {
+pub fn pexels(s: &gio::Settings, api_key: Option<String>, screen: Option<ScreenInfo>) -> PexelsCfg {
     let sc = screen_or_default(screen);
     PexelsCfg {
         query: s.string("pexels-query").to_string(),
