@@ -121,10 +121,25 @@ impl Window {
             .map(|w| crate::favorites::contains(&w.id))
             .unwrap_or(false);
         let button = imp.like_button.get();
+        let was_liked = button.has_css_class("liked");
         if liked {
             button.set_icon_name("emblem-favorite-symbolic");
             button.add_css_class("liked");
             button.set_tooltip_text(Some("Remove from Favorites"));
+            // Small pop animation when the heart is newly liked: a "pop"
+            // CSS animation on the button (GTK 4.14 supports CSS keyframes
+            // on widget transforms; the class removal restarts it cleanly).
+            if !was_liked {
+                const POP_CLASS: &str = "heart-pop";
+                let target = button.clone();
+                button.remove_css_class(POP_CLASS);
+                button.add_css_class(POP_CLASS);
+                // Drop the class after the animation so it can re-run.
+                glib::timeout_add_local(std::time::Duration::from_millis(260), move || {
+                    target.remove_css_class(POP_CLASS);
+                    glib::ControlFlow::Break
+                });
+            }
         } else {
             button.set_icon_name("emblem-favorite-symbolic");
             button.remove_css_class("liked");
