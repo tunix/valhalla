@@ -96,6 +96,11 @@ mod tests {
     // together, serially, so parallel tests cannot race the env.
     #[test]
     fn autostart_lifecycle_serial() {
+        // Uniform rule: any test touching process-global state (env vars)
+        // holds ENV_LOCK for its whole body (see crate::http::test_env).
+        let _env = crate::http::test_env::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let dir = std::env::temp_dir().join(format!("valhalla-autostart-{}", std::process::id()));
         std::env::set_var("XDG_CONFIG_HOME", &dir);
         let _ = std::fs::remove_dir_all(&dir);

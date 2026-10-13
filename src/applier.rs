@@ -113,7 +113,12 @@ mod tests {
 
     #[test]
     fn apply_gsettings_writes_both_keys() {
-        // Real gsettings write via the memory backend: both light and dark URIs.
+        // Real gsettings write via the memory backend: both light and dark
+        // URIs. Serialized against the other backend users via ENV_LOCK
+        // (see crate::http::test_env).
+        let _env = crate::http::test_env::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         std::env::set_var("GSETTINGS_BACKEND", "memory");
         let light = std::env::temp_dir().join("v-light.jpg");
         let dark = std::env::temp_dir().join("v-dark.jpg");

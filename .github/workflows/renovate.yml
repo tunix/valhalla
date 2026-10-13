@@ -17,6 +17,8 @@ jobs:
   renovate:
     name: Renovate
     runs-on: ubuntu-latest
+    # Baseline ~1 min; allow headroom for runs that open several PRs.
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:

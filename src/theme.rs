@@ -75,6 +75,12 @@ mod tests {
 
     #[test]
     fn gsettings_scheme_with_memory_backend() {
+        // Uniform rule: any test touching process-global state (env vars,
+        // the shared GSettings memory backend) holds ENV_LOCK for its whole
+        // body (see crate::http::test_env).
+        let _env = crate::http::test_env::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         std::env::set_var("GSETTINGS_BACKEND", "memory");
         let settings = gio::Settings::new("org.gnome.desktop.interface");
         let _ = settings.set_string("color-scheme", "prefer-dark");

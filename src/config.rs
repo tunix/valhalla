@@ -224,6 +224,12 @@ mod tests {
     /// the settings-driven builders can run without dconf/DBus.
     #[test]
     fn wallhaven_and_unsplash_builders_with_memory_backend() {
+        // Uniform rule: any test touching process-global state (env vars,
+        // the shared GSettings memory backend) holds ENV_LOCK for its whole
+        // body (see crate::http::test_env).
+        let _env = crate::http::test_env::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         std::env::set_var("GSETTINGS_BACKEND", "memory");
         let s = gio::Settings::new("io.github.tunix.valhalla");
         let _ = s.set_string("wallhaven-query", "ocean");
@@ -266,7 +272,11 @@ mod tests {
     #[test]
     fn screen_geometry_roundtrip_with_memory_backend() {
         // Memory backend persists across tests in one process; never assume
-        // an initial value, only roundtrip consistency.
+        // an initial value, only roundtrip consistency. Serialized against
+        // the other backend users via ENV_LOCK (see crate::http::test_env).
+        let _env = crate::http::test_env::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         std::env::set_var("GSETTINGS_BACKEND", "memory");
         let s = gio::Settings::new("io.github.tunix.valhalla");
         store_screen_geometry(

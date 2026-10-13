@@ -163,6 +163,11 @@ mod tests {
     // All manual tests in one serial body: GSETTINGS_BACKEND is process-global.
     #[test]
     fn manual_lifecycle_serial() {
+        // GSETTINGS_BACKEND and the shared memory backend are process-global:
+        // hold ENV_LOCK for the whole body (see crate::http::test_env).
+        let _env = crate::http::test_env::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let s = temp_settings("manual");
         // Memory backend persists across tests in one process — start clean.
         settings().set_string(PATHS_KEY, "").unwrap();
@@ -233,6 +238,13 @@ mod tests {
 
     #[test]
     fn store_roundtrip_persists() {
+        // Writes PATHS_KEY in the same memory backend as
+        // manual_lifecycle_serial — a concurrent store from it lands between
+        // the set and the read-back here and flakily fails the assert
+        // (run 38472595982 died on exactly this). Must not interleave.
+        let _env = crate::http::test_env::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let s = temp_settings("persist");
         let p1 = PathBuf::from("/tmp/x/one.jpg");
         let p2 = PathBuf::from("/tmp/x/two.png");

@@ -189,7 +189,15 @@ mod tests {
     }
 
     #[tokio::test]
+    // ENV_LOCK is intentionally held across the request await: it only
+    // serializes env setup between tests (see crate::http::test_env).
+    #[allow(clippy::await_holding_lock)]
     async fn local_api_maps_photos() {
+        // Parallel tests race on the shared env var and can cross-wire the
+        // stub servers; hold the process-wide lock (see crate::http::test_env).
+        let _env = crate::http::test_env::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let port_guard = StubBaseGuard {
             var: "VALHALLA_UNSPLASH_URL",
         };
@@ -237,7 +245,15 @@ mod tests {
     }
 
     #[tokio::test]
+    // ENV_LOCK is intentionally held across the request await: it only
+    // serializes env setup between tests (see crate::http::test_env).
+    #[allow(clippy::await_holding_lock)]
     async fn unauthorized_key_is_reported() {
+        // Same shared env var as local_api_maps_photos — must not run in
+        // parallel with it (see crate::http::test_env).
+        let _env = crate::http::test_env::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let port_guard = StubBaseGuard {
             var: "VALHALLA_UNSPLASH_URL",
         };
