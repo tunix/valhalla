@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.1](https://github.com/tunix/valhalla/compare/v1.3.0...v1.3.1) (2026-10-13)
+
+
+### Bug Fixes
+
+* **ui:** embed the heart icon; theme lookup broke CSS recoloring ([#56](https://github.com/tunix/valhalla/issues/56)) ([90e1ce3](https://github.com/tunix/valhalla/commit/90e1ce32f711497944a0feebc49e48ff28a51160))
+
 ## [1.3.0](https://github.com/tunix/valhalla/compare/v1.2.0...v1.3.0) (2026-10-13)
 
 
