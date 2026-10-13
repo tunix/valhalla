@@ -170,7 +170,11 @@ mod tests {
     #[test]
     fn lifecycle_serial() {
         // All in one test: XDG_DATA_HOME is process-global; parallel tests
-        // would race it.
+        // would race it. Serialized against the other env users via ENV_LOCK
+        // (see crate::http::test_env).
+        let _env = crate::http::test_env::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         temp_data("life");
 
         let tmp = std::env::temp_dir().join(format!("valhalla-fav-src-{}", std::process::id()));

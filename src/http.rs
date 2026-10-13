@@ -167,7 +167,11 @@ mod tests {
     #[test]
     fn cache_subdirs_exist() {
         // glib user cache dir resolves under XDG_CACHE_HOME; point it at a
-        // temp dir to exercise the real dir-creation paths.
+        // temp dir to exercise the real dir-creation paths. Uniform rule:
+        // env-mutating tests hold ENV_LOCK (see crate::http::test_env).
+        let _env = crate::http::test_env::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let base = std::env::temp_dir().join(format!("valhalla-http-{}", std::process::id()));
         std::env::set_var("XDG_CACHE_HOME", &base);
         let cd = cache_dir();
