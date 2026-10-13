@@ -32,6 +32,19 @@ fn main() {
         "cargo:rerun-if-changed={}",
         icon_dir.join("io.github.tunix.valhalla.svg").display()
     );
+    // The heart toggle icon ships EMBEDDED: the theme lookup for
+    // emblem-favorite-symbolic fails inside some sandboxes (flatpak without
+    // a matching icon theme), and GTK then renders the emoji fallback —
+    // which CSS recoloring cannot touch (stays red permanently).
+    // NOTE: it must live under apps/ — GTK's resource-based icon theme
+    // lookup resolves the app's own embedded icons only from the apps dir
+    // (the app icon already ships there and works).
+    let action_dir = icon_dir.clone();
+    let heart = "valhalla-heart-symbolic.svg";
+    println!(
+        "cargo:rerun-if-changed={}",
+        action_dir.join(heart).display()
+    );
     let mut xml = String::from(
         r#"<?xml version="1.0" encoding="UTF-8"?><gresources><gresource prefix="/io/github/tunix/valhalla">"#,
     );
@@ -42,12 +55,15 @@ fn main() {
     xml.push_str(
         r#"<file compressed="true" alias="icons/hicolor/scalable/apps/io.github.tunix.valhalla.svg">io.github.tunix.valhalla.svg</file>"#,
     );
+    xml.push_str(&format!(
+        r#"<file compressed="true" alias="icons/hicolor/scalable/apps/{heart}">{heart}</file>"#,
+    ));
     xml.push_str("</gresource></gresources>");
     let gxml = out.join("valhalla.gresources.xml");
     fs::write(&gxml, xml).expect("write gresource xml");
 
     glib_build_tools::compile_resources(
-        &[out, icon_dir],
+        &[out, icon_dir, action_dir],
         gxml.to_str().unwrap(),
         "valhalla.gresource",
     );
