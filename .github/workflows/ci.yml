@@ -27,6 +27,8 @@ jobs:
     needs: coverage
     runs-on: ubuntu-latest
     container: fedora:latest
+    # Baseline ~9 min; a hung job must not run to the 6-hour default.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -126,6 +128,9 @@ jobs:
       pct: ${{ steps.cov.outputs.pct }}
     runs-on: ubuntu-latest
     container: fedora:latest
+    # Baseline ~3 min (run 38458597143 once hung for 29+ min with no step
+    # reporting; kill and rerun instead of waiting out the default).
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -212,6 +217,7 @@ jobs:
     name: Label PR
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: read
       pull-requests: write
