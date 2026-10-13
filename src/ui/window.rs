@@ -123,7 +123,7 @@ impl Window {
         let button = imp.like_button.get();
         let was_liked = button.has_css_class("liked");
         if liked {
-            button.set_icon_name("emblem-favorite-symbolic");
+            button.set_icon_name(crate::app::heart_icon_name());
             button.add_css_class("liked");
             button.set_tooltip_text(Some("Remove from Favorites"));
             // Small pop animation when the heart is newly liked: a "pop"
@@ -141,7 +141,7 @@ impl Window {
                 });
             }
         } else {
-            button.set_icon_name("emblem-favorite-symbolic");
+            button.set_icon_name(crate::app::heart_icon_name());
             button.remove_css_class("liked");
             button.set_tooltip_text(Some("Add to Favorites"));
         }
