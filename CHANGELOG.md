@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.3.0](https://github.com/tunix/valhalla/compare/v1.2.0...v1.3.0) (2026-10-13)
+
+
+### Features
+
+* **source:** Pexels, Pixabay, Bing daily archive and NASA APOD sources ([ba5c37d](https://github.com/tunix/valhalla/commit/ba5c37de57cd407bfd617c7ec13388fb42fe05e7))
+
+
+### Bug Fixes
+
+* **ui:** heart button reflects favorite state; pop animation ([d15f8a2](https://github.com/tunix/valhalla/commit/d15f8a2df25d630df2edcf1f72e30bbe4e324e7a))
+
 ## [1.2.0](https://github.com/tunix/valhalla/compare/v1.1.0...v1.2.0) (2026-10-12)
 
 
