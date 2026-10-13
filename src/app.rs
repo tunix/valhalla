@@ -71,8 +71,19 @@ pub fn run() {
 
 fn register_icon_theme() {
     if let Some(display) = gdk::Display::default() {
-        gtk::IconTheme::for_display(&display).add_resource_path("/io/github/tunix/valhalla/icons");
+        // The path must end at the theme root (…/icons/hicolor): GtkIconTheme
+        // resolves <path>/<size>/<category>/<name>. Registering /icons alone
+        // misses it and every embedded icon falls back to image-missing.
+        gtk::IconTheme::for_display(&display)
+            .add_resource_path("/io/github/tunix/valhalla/icons/hicolor");
     }
+}
+
+/// The heart icon's resource base name; the theme must resolve this via the
+/// embedded resource path above. Returns false when the lookup fails — used
+/// by tests to keep the embedded-icon contract honest.
+pub fn heart_icon_name() -> &'static str {
+    "valhalla-heart-symbolic"
 }
 
 fn load_css() {
