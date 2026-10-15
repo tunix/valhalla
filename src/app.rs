@@ -99,7 +99,13 @@ fn load_css() {
            60% { transform: scale(1.25); }\n\
            100% { transform: scale(1); }\n\
          }\n\
-         button.heart-button.heart-pop { animation: heart-pop 250ms ease-out; }\n",
+         button.heart-button.heart-pop { animation: heart-pop 250ms ease-out; }\n\
+         @keyframes heart-unpop {\n\
+           0% { transform: scale(1); }\n\
+           55% { transform: scale(0.82); }\n\
+           100% { transform: scale(1); }\n\
+         }\n\
+         button.heart-button.heart-unpop { animation: heart-unpop 250ms ease-out; }\n",
     );
     if let Some(display) = gdk::Display::default() {
         gtk::style_context_add_provider_for_display(
