@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.2](https://github.com/tunix/valhalla/compare/v1.3.1...v1.3.2) (2026-10-15)
+
+
+### Bug Fixes
+
+* **ui:** unlike animation + README screenshot refresh ([#61](https://github.com/tunix/valhalla/issues/61)) ([c2219ba](https://github.com/tunix/valhalla/commit/c2219bab5a3100bc1b143034486efe0a9e251d16))
+
 ## [1.3.1](https://github.com/tunix/valhalla/compare/v1.3.0...v1.3.1) (2026-10-13)
 
 
