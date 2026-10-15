@@ -148,6 +148,14 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # The appstream metainfo lags one release behind: release-please bumps
+      # the version without touching the metainfo and its sync PR only lands
+      # after the tag is cut, so bundles built here reported the PREVIOUS
+      # version (1.3.2 shipped reporting 1.3.1 in flatpak list/info).
+      # Regenerate <releases> from the checked-out changelog before packaging.
+      - name: Sync appstream <releases> from the changelog
+        run: python3 scripts/update_metainfo.py || [ $? -eq 1 ]
+
       # Keep the vendor list in lockstep with Cargo.lock: regenerate it from
       # the lockfile on every run instead of trusting a committed copy that
       # renovate can silently strand behind. The generator script is pinned
@@ -206,6 +214,11 @@ jobs:
       APPIMAGE_EXTRACT_AND_RUN: "1" # appimagetool runs on non-FUSE runners
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Same rationale as the flatpak job: AppImage embeds the metainfo, keep
+      # its <releases> in step with the changelog before packaging.
+      - name: Sync appstream <releases> from the changelog
+        run: python3 scripts/update_metainfo.py || [ $? -eq 1 ]
 
       - name: Install toolchain
         run: |
