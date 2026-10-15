@@ -144,6 +144,18 @@ impl Window {
             button.set_icon_name(crate::app::heart_icon_name());
             button.remove_css_class("liked");
             button.set_tooltip_text(Some("Add to Favorites"));
+            // Symmetric shrink on un-like: same pop class, reversed feel via
+            // the heart-unpop keyframes (scale down with a tiny undershoot).
+            if was_liked {
+                const UNPOP_CLASS: &str = "heart-unpop";
+                let target = button.clone();
+                button.remove_css_class(UNPOP_CLASS);
+                button.add_css_class(UNPOP_CLASS);
+                glib::timeout_add_local(std::time::Duration::from_millis(260), move || {
+                    target.remove_css_class(UNPOP_CLASS);
+                    glib::ControlFlow::Break
+                });
+            }
         }
     }
 
