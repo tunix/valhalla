@@ -215,18 +215,19 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # Same rationale as the flatpak job: AppImage embeds the metainfo, keep
-      # its <releases> in step with the changelog before packaging.
-      - name: Sync appstream <releases> from the changelog
-        run: python3 scripts/update_metainfo.py || [ $? -eq 1 ]
-
       - name: Install toolchain
         run: |
           apt-get update -q
           DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            rustc cargo gcc pkg-config libgtk-4-dev libadwaita-1-dev libsecret-1-dev \
+            python3 rustc cargo gcc pkg-config libgtk-4-dev libadwaita-1-dev libsecret-1-dev \
             libglib2.0-dev blueprint-compiler git curl file desktop-file-utils \
             libfuse2 zsync ca-certificates
+
+      # Same rationale as the flatpak job: AppImage embeds the metainfo, keep
+      # its <releases> in step with the changelog before packaging. Must run
+      # after Install toolchain: the bare ubuntu image ships no python3.
+      - name: Sync appstream <releases> from the changelog
+        run: python3 scripts/update_metainfo.py || [ $? -eq 1 ]
 
       - name: Cache cargo artifacts
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
