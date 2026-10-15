@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.3](https://github.com/tunix/valhalla/compare/v1.3.2...v1.3.3) (2026-10-15)
+
+
+### Bug Fixes
+
+* **ci:** accept update_metainfo.py's exit 1 in the sync step ([73daa53](https://github.com/tunix/valhalla/commit/73daa537157181f3b081448a6cd11bd04e5cb8be))
+* **ci:** sync appstream &lt;releases&gt; before bundling flatpak/AppImage ([07e663b](https://github.com/tunix/valhalla/commit/07e663b1e8bedef66a80add99275a058e0df3af9))
+
 ## [1.3.2](https://github.com/tunix/valhalla/compare/v1.3.1...v1.3.2) (2026-10-15)
 
 
