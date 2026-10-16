@@ -104,6 +104,7 @@ impl Window {
         window.setup_dropdown();
         window.setup_actions();
         window.setup_close();
+        window.watch_size_changes();
         window.watch_settings();
         window.update_banner();
         window.restore_preview();
@@ -323,11 +324,56 @@ impl Window {
     fn save_window_size(&self) {
         let settings = self.imp().settings.get().unwrap();
         let maximized = self.is_maximized();
-        if !maximized {
-            let _ = settings.set_int("window-width", self.width());
-            let _ = settings.set_int("window-height", self.height());
+        let (w, h) = (self.width(), self.height());
+        // A hidden or being-destroyed window can report a bogus 1×1
+        // allocation; saving that would come back as a tiny window next
+        // launch. The real minimum is 360×300 (width/height-request), so
+        // anything under ~100 was not a size anyone chose.
+        if !maximized && w > 100 && h > 100 {
+            let _ = settings.set_int("window-width", w);
+            let _ = settings.set_int("window-height", h);
         }
         let _ = settings.set_boolean("window-maximized", maximized);
+    }
+
+    /// Persist interactive resizes with a short debounce. Close-request and
+    /// unrealize never run when the app is killed outright (Ctrl+C on
+    /// `cargo run`, a crash), which is the everyday dev loop — without this
+    /// watch the size would never be saved at all.
+    fn watch_size_changes(&self) {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        let win = self.downgrade();
+        let pending: Rc<RefCell<Option<glib::SourceId>>> = Rc::new(RefCell::new(None));
+        for prop in ["width", "height"] {
+            let win = win.clone();
+            let pending = Rc::clone(&pending);
+            self.connect_notify_local(Some(prop), move |_, _| {
+                let Some(window) = win.upgrade() else {
+                    return;
+                };
+                if !window.is_visible() || window.is_maximized() {
+                    return; // layout noise or maximized geometry — not a chosen size
+                }
+                // Debounce: save once the window has held still for a
+                // moment, not on every drag pixel.
+                if let Some(id) = pending.borrow_mut().take() {
+                    id.remove();
+                }
+                let win = win.clone();
+                let pending_for_timer = Rc::clone(&pending);
+                let id =
+                    glib::timeout_add_local(std::time::Duration::from_millis(400), move || {
+                        *pending_for_timer.borrow_mut() = None;
+                        if let Some(window) = win.upgrade() {
+                            window.save_window_size();
+                        }
+                        glib::ControlFlow::Break
+                    });
+                *pending.borrow_mut() = Some(id);
+            });
+        }
     }
 
     fn watch_settings(&self) {
