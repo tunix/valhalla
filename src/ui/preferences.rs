@@ -35,27 +35,96 @@ const WALLHAVEN_SORTING_LABELS: [&str; 6] = [
 const CONTENT_FILTER_VALUES: [&str; 2] = ["low", "high"];
 const CONTENT_FILTER_LABELS: [&str; 2] = ["Low (moderate)", "High (strict)"];
 
-/// Build the preferences dialog for the given settings.
-pub fn build(settings: &gio::Settings) -> adw::PreferencesDialog {
-    let dialog = adw::PreferencesDialog::new();
-    // 8 pages: HIG recommends enabling search once the sidebar grows.
-    dialog.set_search_enabled(true);
+/// Sidebar entries: (stack name, label, icon). Order = sidebar order.
+const SIDEBAR: [(&str, &str, &str, &str); 8] = [
+    (
+        "general",
+        "General",
+        "source-general",
+        "Refresh schedule and behavior",
+    ),
+    (
+        "wallhaven",
+        "Wallhaven",
+        "source-wallhaven",
+        "Community wallpaper site — search by tags, colors and purity",
+    ),
+    (
+        "unsplash",
+        "Unsplash",
+        "source-unsplash",
+        "Free high-resolution photography",
+    ),
+    (
+        "pexels",
+        "Pexels",
+        "source-pexels",
+        "Free stock photos from the Pexels community",
+    ),
+    (
+        "pixabay",
+        "Pixabay",
+        "source-pixabay",
+        "Royalty-free images by category",
+    ),
+    (
+        "bing",
+        "Bing",
+        "source-bing",
+        "Microsoft Bing's image of the day",
+    ),
+    (
+        "nasa",
+        "NASA",
+        "source-nasa",
+        "Astronomy Picture of the Day",
+    ),
+    (
+        "manual",
+        "Manual",
+        "source-manual",
+        "Your own pictures and folders",
+    ),
+];
 
-    dialog.add(&general_page(settings));
+/// Preferences window: a sidebar listing every source with its brand logo,
+/// and the selected source's settings on the right (collapses to a
+/// navigation stack on narrow widths).
+struct Pages {
+    stack: gtk::Stack,
+}
+
+impl Pages {
+    fn add(&self, page: &adw::PreferencesPage) {
+        let name = page.title().to_lowercase();
+        self.stack.add_named(page, Some(&name));
+    }
+}
+
+/// Build the preferences dialog for the given settings.
+pub fn build(settings: &gio::Settings) -> adw::Dialog {
+    let pages = Pages {
+        stack: gtk::Stack::builder()
+            .transition_type(gtk::StackTransitionType::Crossfade)
+            .vhomogeneous(false)
+            .build(),
+    };
+
+    pages.add(&general_page(settings));
 
     let (wh_page, wh_key_row, nsfw_row, _purity_rows) = wallhaven_page(settings);
-    dialog.add(&wh_page);
+    pages.add(&wh_page);
 
     let (un_page, un_key_row) = unsplash_page(settings);
-    dialog.add(&un_page);
+    pages.add(&un_page);
 
     let (px_page, px_key_row) = pexels_page(settings);
-    dialog.add(&px_page);
+    pages.add(&px_page);
 
     let (pb_page, pb_key_row) = pixabay_page(settings);
-    dialog.add(&pb_page);
+    pages.add(&pb_page);
 
-    dialog.add(&bing_page());
+    pages.add(&bing_page());
     let nasa_key_row = adw::EntryRow::new();
     nasa_key_row.set_title("API key (optional)");
     nasa_key_row.set_show_apply_button(true);
@@ -71,10 +140,10 @@ pub fn build(settings: &gio::Settings) -> adw::PreferencesDialog {
             }
         });
     });
-    dialog.add(&nasa_page(nasa_key_row.clone()));
+    pages.add(&nasa_page(nasa_key_row.clone()));
 
     let manual_page = manual_page(settings);
-    dialog.add(&manual_page);
+    pages.add(&manual_page);
 
     // Load stored keys from the keyring off the main thread.
     let (tx, rx) = async_channel::unbounded::<(Option<String>, Option<String>)>();
@@ -118,13 +187,131 @@ pub fn build(settings: &gio::Settings) -> adw::PreferencesDialog {
         }
     });
 
+    assemble(pages.stack)
+}
+
+fn sidebar_row(label: &str, icon: &str) -> gtk::ListBoxRow {
+    let image = gtk::Image::from_icon_name(icon);
+    image.set_pixel_size(24);
+    let text = gtk::Label::builder()
+        .label(label)
+        .xalign(0.0)
+        .hexpand(true)
+        .build();
+    let hbox = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(12)
+        .margin_top(6)
+        .margin_bottom(6)
+        .build();
+    hbox.append(&image);
+    hbox.append(&text);
+    gtk::ListBoxRow::builder().child(&hbox).build()
+}
+
+fn assemble(stack: gtk::Stack) -> adw::Dialog {
+    let list = gtk::ListBox::new();
+    list.add_css_class("navigation-sidebar");
+    list.set_selection_mode(gtk::SelectionMode::Single);
+    for (name, label, icon, description) in SIDEBAR {
+        list.append(&sidebar_row(label, icon));
+        if let Some(page) = stack
+            .child_by_name(name)
+            .and_downcast::<adw::PreferencesPage>()
+        {
+            page.set_description(description);
+        }
+    }
+
+    // Filter the sidebar by source name (mockup A search field).
+    let search = gtk::SearchEntry::builder()
+        .placeholder_text("Search…")
+        .margin_start(12)
+        .margin_end(12)
+        .margin_top(6)
+        .margin_bottom(6)
+        .build();
+    let search_weak = search.downgrade();
+    list.set_filter_func(move |row| {
+        let Some(search) = search_weak.upgrade() else {
+            return true;
+        };
+        let needle = search.text().to_lowercase();
+        let (_, label, _, _) = SIDEBAR[row.index() as usize];
+        needle.is_empty() || label.to_lowercase().contains(&needle)
+    });
+    let list_weak = list.downgrade();
+    search.connect_search_changed(move |_| {
+        if let Some(list) = list_weak.upgrade() {
+            list.invalidate_filter();
+        }
+    });
+
+    let content_view = adw::ToolbarView::new();
+    content_view.add_top_bar(&adw::HeaderBar::new());
+    content_view.set_content(Some(&stack));
+    let content_page = adw::NavigationPage::new(&content_view, "General");
+
+    let sidebar_view = adw::ToolbarView::new();
+    sidebar_view.add_top_bar(
+        &adw::HeaderBar::builder()
+            .title_widget(&adw::WindowTitle::new("Preferences", ""))
+            .build(),
+    );
+    let sidebar_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    sidebar_box.append(&search);
+    sidebar_box.append(
+        &gtk::ScrolledWindow::builder()
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .vexpand(true)
+            .child(&list)
+            .build(),
+    );
+    sidebar_view.set_content(Some(&sidebar_box));
+    let sidebar_page = adw::NavigationPage::new(&sidebar_view, "Preferences");
+
+    let split = adw::NavigationSplitView::new();
+    split.set_min_sidebar_width(200.0);
+    split.set_max_sidebar_width(240.0);
+    split.set_sidebar(Some(&sidebar_page));
+    split.set_content(Some(&content_page));
+
+    let split_weak = split.downgrade();
+    let stack_weak = stack.downgrade();
+    let page_weak = content_page.downgrade();
+    list.connect_row_selected(move |_, row| {
+        let (Some(row), Some(stack), Some(page)) = (row, stack_weak.upgrade(), page_weak.upgrade())
+        else {
+            return;
+        };
+        let (name, label, _, _) = SIDEBAR[row.index() as usize];
+        stack.set_visible_child_name(name);
+        page.set_title(label);
+        if let Some(split) = split_weak.upgrade() {
+            split.set_show_content(true);
+        }
+    });
+    list.select_row(list.row_at_index(0).as_ref());
+
+    let dialog = adw::Dialog::builder()
+        .title("Preferences")
+        .content_width(820)
+        .content_height(600)
+        .child(&split)
+        .build();
+
+    let narrow = adw::Breakpoint::new(
+        adw::BreakpointCondition::parse("max-width: 560sp").expect("valid breakpoint"),
+    );
+    narrow.add_setter(&split, "collapsed", Some(&true.to_value()));
+    dialog.add_breakpoint(narrow);
+
     dialog
 }
 
 fn general_page(settings: &gio::Settings) -> adw::PreferencesPage {
     let page = adw::PreferencesPage::new();
     page.set_title("General");
-    page.set_icon_name(Some("applications-system-symbolic"));
 
     let refresh_group = adw::PreferencesGroup::new();
     refresh_group.set_title("Automatic refresh");
@@ -269,7 +456,6 @@ fn wallhaven_page(
 ) {
     let page = adw::PreferencesPage::new();
     page.set_title("Wallhaven");
-    page.set_icon_name(Some("source-wallhaven"));
 
     let api_group = adw::PreferencesGroup::new();
     api_group.set_title("API");
@@ -346,7 +532,6 @@ fn wallhaven_page(
 fn pexels_page(settings: &gio::Settings) -> (adw::PreferencesPage, adw::EntryRow) {
     let page = adw::PreferencesPage::new();
     page.set_title("Pexels");
-    page.set_icon_name(Some("source-pexels"));
 
     let api_group = adw::PreferencesGroup::new();
     api_group.set_title("API");
@@ -384,7 +569,6 @@ fn pexels_page(settings: &gio::Settings) -> (adw::PreferencesPage, adw::EntryRow
 fn pixabay_page(settings: &gio::Settings) -> (adw::PreferencesPage, adw::EntryRow) {
     let page = adw::PreferencesPage::new();
     page.set_title("Pixabay");
-    page.set_icon_name(Some("source-pixabay"));
 
     let api_group = adw::PreferencesGroup::new();
     api_group.set_title("API");
@@ -429,7 +613,6 @@ fn pixabay_page(settings: &gio::Settings) -> (adw::PreferencesPage, adw::EntryRo
 fn bing_page() -> adw::PreferencesPage {
     let page = adw::PreferencesPage::new();
     page.set_title("Bing");
-    page.set_icon_name(Some("source-bing"));
 
     let group = adw::PreferencesGroup::new();
     group.set_title("Daily wallpaper");
@@ -445,7 +628,6 @@ fn bing_page() -> adw::PreferencesPage {
 fn nasa_page(key_row: adw::EntryRow) -> adw::PreferencesPage {
     let page = adw::PreferencesPage::new();
     page.set_title("NASA");
-    page.set_icon_name(Some("source-nasa"));
 
     let api_group = adw::PreferencesGroup::new();
     api_group.set_title("API");
@@ -465,7 +647,6 @@ fn manual_page(settings: &gio::Settings) -> adw::PreferencesPage {
 
     let page = adw::PreferencesPage::new();
     page.set_title("Manual");
-    page.set_icon_name(Some("folder-pictures-symbolic"));
 
     let group = adw::PreferencesGroup::new();
     group.set_title("Your wallpapers");
@@ -608,7 +789,6 @@ fn manual_page(settings: &gio::Settings) -> adw::PreferencesPage {
 fn unsplash_page(settings: &gio::Settings) -> (adw::PreferencesPage, adw::EntryRow) {
     let page = adw::PreferencesPage::new();
     page.set_title("Unsplash");
-    page.set_icon_name(Some("source-unsplash"));
 
     let api_group = adw::PreferencesGroup::new();
     api_group.set_title("API");
