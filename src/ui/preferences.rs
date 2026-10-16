@@ -1,5 +1,7 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
@@ -203,6 +205,11 @@ pub fn build(settings: &gio::Settings) -> adw::Dialog {
 fn sidebar_row(label: &str, icon: &str) -> gtk::ListBoxRow {
     let image = gtk::Image::from_icon_name(icon);
     image.set_pixel_size(24);
+    // The Favorites heart reads better in the destructive red the heart
+    // button uses when liked, than in the plain foreground color.
+    if icon == crate::app::heart_icon_name() {
+        image.add_css_class("favorites-heart");
+    }
     let text = gtk::Label::builder()
         .label(label)
         .xalign(0.0)
@@ -461,6 +468,16 @@ const TILE_WIDTH: i32 = 168;
 const TILE_HEIGHT: i32 = 94;
 const THUMB_SIZE: u32 = 336;
 
+/// Decoded thumbnail textures keyed by the favorite's stored path. The
+/// dialog (and thus the page) is rebuilt on every open, and removals
+/// rebuild the whole grid — without this cache every rebuild would
+/// re-decode every image. GdkTexture is immutable and thread-safe
+/// (gdk-rs marks it `Send`), so one process-wide map serves all rebuilds.
+fn thumb_cache() -> &'static Mutex<HashMap<String, Arc<gdk::Texture>>> {
+    static CACHE: OnceLock<Mutex<HashMap<String, Arc<gdk::Texture>>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
 /// Favorites: every wallpaper liked with the heart button, shown as a
 /// grid of thumbnails. Hovering a tile reveals preview and remove actions.
 fn favorites_page() -> adw::PreferencesPage {
@@ -507,6 +524,12 @@ fn rebuild_favorites_flow(flow: &gtk::FlowBox, empty: &gtk::Label) {
     let has_favs = !favs.is_empty();
     flow.set_visible(has_favs);
     empty.set_visible(!has_favs);
+    // Drop cache entries whose favorite is gone (e.g. removed just now),
+    // so the stored files' memory is reclaimed promptly.
+    {
+        let mut cache = thumb_cache().lock().unwrap();
+        cache.retain(|path, _| favs.iter().any(|f| &f.path == path));
+    }
     for fav in favs {
         let flow_weak = flow.downgrade();
         let empty_weak = empty.downgrade();
@@ -536,27 +559,36 @@ fn fav_tile(fav: Favorite, rebuild: Rc<dyn Fn()>) -> gtk::FlowBoxChild {
         .build();
     tile.set_child(Some(&picture));
 
-    // Decode + downscale off the main thread; the callback swaps in the
-    // texture when it arrives.
-    let (tx, rx) = async_channel::unbounded::<Result<Vec<u8>, String>>();
-    let path = PathBuf::from(&fav.path);
-    crate::tokio_handle().spawn_blocking(move || {
-        let _ = tx.send_blocking(load_image_jpeg(&path, THUMB_SIZE));
-    });
-    let pic_weak = picture.downgrade();
-    glib::spawn_future_local(async move {
-        if let Ok(loaded) = rx.recv().await {
-            let Some(pic) = pic_weak.upgrade() else {
-                return;
-            };
-            match loaded.and_then(|bytes| {
-                gdk::Texture::from_bytes(&glib::Bytes::from_owned(bytes)).map_err(|e| e.to_string())
-            }) {
-                Ok(tex) => pic.set_paintable(Some(&tex)),
-                Err(e) => tracing::warn!("favorite thumbnail failed: {e}"),
+    // Cache hit paints instantly; a miss decodes + downscales off the main
+    // thread and stores the texture for the next rebuild/open.
+    let cache_key = fav.path.clone();
+    if let Some(tex) = thumb_cache().lock().unwrap().get(&cache_key).cloned() {
+        picture.set_paintable(Some(tex.as_ref()));
+    } else {
+        let (tx, rx) = async_channel::unbounded::<Result<Vec<u8>, String>>();
+        let path = PathBuf::from(&fav.path);
+        crate::tokio_handle().spawn_blocking(move || {
+            let _ = tx.send_blocking(load_image_jpeg(&path, THUMB_SIZE));
+        });
+        let pic_weak = picture.downgrade();
+        glib::spawn_future_local(async move {
+            if let Ok(loaded) = rx.recv().await {
+                match loaded.and_then(|bytes| {
+                    gdk::Texture::from_bytes(&glib::Bytes::from_owned(bytes))
+                        .map_err(|e| e.to_string())
+                }) {
+                    Ok(tex) => {
+                        let tex = Arc::new(tex);
+                        thumb_cache().lock().unwrap().insert(cache_key, tex.clone());
+                        if let Some(pic) = pic_weak.upgrade() {
+                            pic.set_paintable(Some(tex.as_ref()));
+                        }
+                    }
+                    Err(e) => tracing::warn!("favorite thumbnail failed: {e}"),
+                }
             }
-        }
-    });
+        });
+    }
 
     // Hover actions: reveal only while the pointer is over the tile; the
     // hidden bar must not grab clicks either.
