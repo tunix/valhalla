@@ -100,6 +100,7 @@ impl Window {
         let _ = imp.settings.set(settings.clone());
         let _ = imp.trig.set(trig);
 
+        window.restore_window_size();
         window.setup_dropdown();
         window.setup_actions();
         window.setup_close();
@@ -283,6 +284,9 @@ impl Window {
             let Some(window) = win.upgrade() else {
                 return glib::Propagation::Proceed;
             };
+            // Remember the geometry whether we hide to the background or
+            // really close, so the next open comes back at the same size.
+            window.save_window_size();
             if settings.boolean("run-in-background") {
                 // Keep the process alive for scheduled refreshes; the menu's
                 // Quit action exits fully.
@@ -293,6 +297,37 @@ impl Window {
                 glib::Propagation::Proceed
             }
         });
+        // Unrealize also covers the `app.quit()` path, where close-request
+        // never fires even though the window goes away.
+        self.connect_unrealize(|window| window.save_window_size());
+    }
+
+    /// Restore the window size and maximized state persisted by
+    /// `save_window_size`; the Blueprint defaults apply when nothing
+    /// sensible was saved yet.
+    fn restore_window_size(&self) {
+        let settings = self.imp().settings.get().unwrap();
+        let (w, h) = (settings.int("window-width"), settings.int("window-height"));
+        if w > 0 && h > 0 {
+            self.set_default_size(w, h);
+        }
+        if settings.boolean("window-maximized") {
+            self.maximize();
+        }
+    }
+
+    /// Persist the window geometry for the next session. The size is only
+    /// saved while unmaximized: a maximized window reports its full monitor
+    /// size, and restoring that later would pin the unmaximized window to
+    /// those dimensions. The maximized flag itself is always saved.
+    fn save_window_size(&self) {
+        let settings = self.imp().settings.get().unwrap();
+        let maximized = self.is_maximized();
+        if !maximized {
+            let _ = settings.set_int("window-width", self.width());
+            let _ = settings.set_int("window-height", self.height());
+        }
+        let _ = settings.set_boolean("window-maximized", maximized);
     }
 
     fn watch_settings(&self) {
