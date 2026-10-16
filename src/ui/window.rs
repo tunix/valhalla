@@ -219,14 +219,15 @@ impl Window {
                 imp.toast_overlay.add_toast(adw::Toast::new(e));
             }
             window.update_heart();
-            // A fresh like pre-warms the thumbnail cache so the Favorites
-            // page paints the new tile instantly when next opened.
+            // A fresh like pre-warms the thumbnail and preview caches so
+            // the Favorites page and the preview window are instant later.
             if !was_liked && result.is_ok() {
                 if let Some(fav) = crate::favorites::list()
                     .into_iter()
                     .find(|f| f.id == current.id)
                 {
                     crate::ui::thumbnails::prewarm(&fav.path);
+                    crate::ui::thumbnails::prewarm_preview(&fav.path);
                 }
             }
         });

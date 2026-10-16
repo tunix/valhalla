@@ -82,13 +82,33 @@ fn preview_slot() -> &'static Mutex<PreviewSlot> {
     SLOT.get_or_init(|| Mutex::new(None))
 }
 
-/// Preview texture from the on-disk preview cache, if readable/decodable.
-/// Also seeds the single-slot memory cache so the next open is a plain hit.
-fn preview_from_disk(path: &str) -> Option<Arc<gdk::Texture>> {
-    let bytes = std::fs::read(preview_disk_path(Path::new(path))).ok()?;
-    let tex = Arc::new(gdk::Texture::from_bytes(&glib::Bytes::from_owned(bytes)).ok()?);
-    *preview_slot().lock().unwrap() = Some((path.to_string(), tex.clone()));
-    Some(tex)
+/// Blocking: the preview texture for `path` — bytes from the on-disk
+/// preview cache when present, else a decode of the source at `budget`
+/// that is persisted for future runs. GdkTexture is immutable and usable
+/// off the main thread, so the heavy decode+`from_bytes` work never
+/// blocks the UI.
+fn preview_texture(path: &str, budget: u32) -> Result<Arc<gdk::Texture>, String> {
+    let disk = preview_disk_path(Path::new(path));
+    if let Ok(bytes) = std::fs::read(&disk) {
+        if let Ok(tex) = gdk::Texture::from_bytes(&glib::Bytes::from_owned(bytes)) {
+            return Ok(Arc::new(tex));
+        }
+    }
+    let bytes = load_image_jpeg(Path::new(path), budget)?;
+    let _ = std::fs::write(&disk, &bytes);
+    let tex =
+        gdk::Texture::from_bytes(&glib::Bytes::from_owned(bytes)).map_err(|e| e.to_string())?;
+    Ok(Arc::new(tex))
+}
+
+/// Generate the on-disk preview file if it doesn't exist yet (blocking).
+fn generate_preview_file(path: &str, budget: u32) -> Result<(), String> {
+    let disk = preview_disk_path(Path::new(path));
+    if disk.exists() {
+        return Ok(());
+    }
+    let bytes = load_image_jpeg(Path::new(path), budget)?;
+    std::fs::write(&disk, &bytes).map_err(|e| e.to_string())
 }
 
 /// Thumbnail texture from the disk cache, if readable/decodable. Also
@@ -194,14 +214,14 @@ pub fn prewarm(path: &str) {
 /// completion via `on_done` (exactly once, success or failure — the caller
 /// must use it to stop its spinner).
 ///
-/// Order of speed: single-slot memory hit → on-disk preview cache →
-/// off-thread decode at the monitor-sized budget (persisted to
-/// `thumbs/<id>.preview.jpg` for future runs).
+/// Order of speed: single-slot memory hit (instant) → on-disk preview
+/// cache → off-thread decode at the monitor-sized budget (persisted to
+/// `thumbs/<id>.preview.jpg` for future runs). All disk/decode work runs
+/// off the main thread.
 pub fn load_preview(path: &str, picture: &gtk::Picture, on_done: impl Fn(bool) + 'static) {
-    // Lookups are split into separate statements on purpose: a guard
-    // temporary in an `if let` scrutinee or `a || b` condition lives until
-    // the end of the whole expression, so chaining a lookup into a call
-    // that re-locks the same mutex deadlocks.
+    // Lookup is split from the paint on purpose: a guard temporary in an
+    // `if let` scrutinee lives until the end of the whole expression, so
+    // chaining a lookup into a call that re-locks the same mutex deadlocks.
     let cached = preview_slot().lock().unwrap().clone();
     if let Some((key, tex)) = cached {
         if key == path {
@@ -210,19 +230,19 @@ pub fn load_preview(path: &str, picture: &gtk::Picture, on_done: impl Fn(bool) +
             return;
         }
     }
-    if let Some(tex) = preview_from_disk(path) {
-        picture.set_paintable(Some(tex.as_ref()));
-        on_done(true);
-        return;
-    }
-    let disk = preview_disk_path(Path::new(path));
-    let rx = spawn_decode(Path::new(path), preview_budget(), Some(disk));
+    let budget = preview_budget(); // main-thread gdk access, then off-thread work
+    let (tx, rx) = async_channel::unbounded::<Result<Arc<gdk::Texture>, String>>();
+    let src = path.to_string();
+    crate::tokio_handle().spawn_blocking(move || {
+        let _ = tx.send_blocking(preview_texture(&src, budget));
+    });
     let pic = picture.downgrade();
     let key = path.to_string();
     glib::spawn_future_local(async move {
-        let tex = await_preview_texture(key, rx).await;
-        if let Some(pic) = pic.upgrade() {
-            if let Some(tex) = &tex {
+        let tex = rx.recv().await.ok().and_then(|r| r.ok());
+        if let Some(tex) = &tex {
+            *preview_slot().lock().unwrap() = Some((key, tex.clone()));
+            if let Some(pic) = pic.upgrade() {
                 pic.set_paintable(Some(tex.as_ref()));
             }
         }
@@ -230,29 +250,34 @@ pub fn load_preview(path: &str, picture: &gtk::Picture, on_done: impl Fn(bool) +
     });
 }
 
-/// Await decoded preview bytes, turn them into a texture and store it in
-/// the single-slot preview cache. Returns the texture so the caller can
-/// paint immediately.
-async fn await_preview_texture(
-    key: String,
-    rx: async_channel::Receiver<Result<Vec<u8>, String>>,
-) -> Option<Arc<gdk::Texture>> {
-    let Ok(loaded) = rx.recv().await else {
-        return None;
-    };
-    match loaded.and_then(|bytes| {
-        gdk::Texture::from_bytes(&glib::Bytes::from_owned(bytes)).map_err(|e| e.to_string())
-    }) {
-        Ok(tex) => {
-            let tex = Arc::new(tex);
-            *preview_slot().lock().unwrap() = Some((key, tex.clone()));
-            Some(tex)
-        }
-        Err(e) => {
-            tracing::warn!("preview decode failed: {e}");
-            None
-        }
+/// Pre-decode the preview of a freshly liked wallpaper in the background
+/// so its first preview click paints instantly. No-op when the on-disk
+/// preview already exists.
+pub fn prewarm_preview(path: &str) {
+    if preview_disk_path(Path::new(path)).exists() {
+        return;
     }
+    let budget = preview_budget(); // main-thread gdk access
+    let src = path.to_string();
+    crate::tokio_handle().spawn_blocking(move || {
+        if let Err(e) = generate_preview_file(&src, budget) {
+            tracing::debug!("preview prewarm failed for {src}: {e}");
+        }
+    });
+}
+
+/// Generate missing on-disk previews for many favorites, sequentially on
+/// one blocking thread — the grid calls this on open so every preview
+/// click finds its file ready. Existing files are skipped in O(1).
+pub fn prewarm_previews(paths: Vec<String>) {
+    let budget = preview_budget(); // main-thread gdk access
+    crate::tokio_handle().spawn_blocking(move || {
+        for path in paths {
+            if let Err(e) = generate_preview_file(&path, budget) {
+                tracing::debug!("preview prewarm failed for {path}: {e}");
+            }
+        }
+    });
 }
 
 /// Kick off a blocking decode; results arrive as JPEG bytes on `rx`.

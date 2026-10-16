@@ -514,6 +514,9 @@ fn rebuild_favorites_flow(flow: &gtk::FlowBox, empty: &gtk::Label) {
     // so the stored files' memory is reclaimed promptly.
     let paths: Vec<String> = favs.iter().map(|f| f.path.clone()).collect();
     crate::ui::thumbnails::retain_only(&paths);
+    // Fill in any missing on-disk previews in the background, so preview
+    // clicks always find their screen-sized file ready.
+    crate::ui::thumbnails::prewarm_previews(paths);
     for fav in favs {
         let flow_weak = flow.downgrade();
         let empty_weak = empty.downgrade();
