@@ -651,6 +651,17 @@ fn show_preview_window(fav: &Favorite) {
     overlay.add_overlay(&spinner);
 
     window.set_child(Some(&overlay));
+
+    // Escape closes the preview like a dialog does: "window.close" is
+    // GTK's built-in close action available on every window.
+    let shortcuts = gtk::ShortcutController::new();
+    shortcuts.set_scope(gtk::ShortcutScope::Local);
+    shortcuts.add_shortcut(gtk::Shortcut::new(
+        gtk::ShortcutTrigger::parse_string("Escape"),
+        Some(gtk::NamedAction::new("window.close")),
+    ));
+    window.add_controller(shortcuts);
+
     // Present before decoding: the preview must open instantly.
     window.present();
 
