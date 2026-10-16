@@ -269,7 +269,7 @@ fn wallhaven_page(
 ) {
     let page = adw::PreferencesPage::new();
     page.set_title("Wallhaven");
-    page.set_icon_name(Some("applications-internet-symbolic"));
+    page.set_icon_name(Some("source-wallhaven"));
 
     let api_group = adw::PreferencesGroup::new();
     api_group.set_title("API");
@@ -346,7 +346,7 @@ fn wallhaven_page(
 fn pexels_page(settings: &gio::Settings) -> (adw::PreferencesPage, adw::EntryRow) {
     let page = adw::PreferencesPage::new();
     page.set_title("Pexels");
-    page.set_icon_name(Some("applications-internet-symbolic"));
+    page.set_icon_name(Some("source-pexels"));
 
     let api_group = adw::PreferencesGroup::new();
     api_group.set_title("API");
@@ -384,7 +384,7 @@ fn pexels_page(settings: &gio::Settings) -> (adw::PreferencesPage, adw::EntryRow
 fn pixabay_page(settings: &gio::Settings) -> (adw::PreferencesPage, adw::EntryRow) {
     let page = adw::PreferencesPage::new();
     page.set_title("Pixabay");
-    page.set_icon_name(Some("applications-internet-symbolic"));
+    page.set_icon_name(Some("source-pixabay"));
 
     let api_group = adw::PreferencesGroup::new();
     api_group.set_title("API");
@@ -429,7 +429,7 @@ fn pixabay_page(settings: &gio::Settings) -> (adw::PreferencesPage, adw::EntryRo
 fn bing_page() -> adw::PreferencesPage {
     let page = adw::PreferencesPage::new();
     page.set_title("Bing");
-    page.set_icon_name(Some("applications-internet-symbolic"));
+    page.set_icon_name(Some("source-bing"));
 
     let group = adw::PreferencesGroup::new();
     group.set_title("Daily wallpaper");
@@ -445,7 +445,7 @@ fn bing_page() -> adw::PreferencesPage {
 fn nasa_page(key_row: adw::EntryRow) -> adw::PreferencesPage {
     let page = adw::PreferencesPage::new();
     page.set_title("NASA");
-    page.set_icon_name(Some("applications-internet-symbolic"));
+    page.set_icon_name(Some("source-nasa"));
 
     let api_group = adw::PreferencesGroup::new();
     api_group.set_title("API");
@@ -608,7 +608,7 @@ fn manual_page(settings: &gio::Settings) -> adw::PreferencesPage {
 fn unsplash_page(settings: &gio::Settings) -> (adw::PreferencesPage, adw::EntryRow) {
     let page = adw::PreferencesPage::new();
     page.set_title("Unsplash");
-    page.set_icon_name(Some("applications-internet-symbolic"));
+    page.set_icon_name(Some("source-unsplash"));
 
     let api_group = adw::PreferencesGroup::new();
     api_group.set_title("API");
