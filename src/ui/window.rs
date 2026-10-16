@@ -201,7 +201,8 @@ impl Window {
             let Some(current) = imp.current_wallpaper.borrow().clone() else {
                 return; // nothing to like yet
             };
-            let result = if crate::favorites::contains(&current.id) {
+            let was_liked = crate::favorites::contains(&current.id);
+            let result = if was_liked {
                 crate::favorites::remove(&current.id)
             } else {
                 crate::favorites::add(
@@ -213,10 +214,20 @@ impl Window {
                     Some(current.scheme),
                 )
             };
-            if let Err(e) = result {
-                imp.toast_overlay.add_toast(adw::Toast::new(&e));
+            if let Err(e) = &result {
+                imp.toast_overlay.add_toast(adw::Toast::new(e));
             }
             window.update_heart();
+            // A fresh like pre-warms the thumbnail cache so the Favorites
+            // page paints the new tile instantly when next opened.
+            if !was_liked && result.is_ok() {
+                if let Some(fav) = crate::favorites::list()
+                    .into_iter()
+                    .find(|f| f.id == current.id)
+                {
+                    crate::ui::thumbnails::prewarm(&fav.path);
+                }
+            }
         });
         self.add_action(&toggle_favorite);
 

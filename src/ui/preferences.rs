@@ -1,7 +1,5 @@
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::rc::Rc;
-use std::sync::{Arc, Mutex, OnceLock};
 
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
@@ -463,20 +461,9 @@ fn general_page(settings: &gio::Settings) -> adw::PreferencesPage {
     page
 }
 
-/// Size of one grid tile (16:9-ish) and its 2× HiDPI thumbnail budget.
+/// Size of one grid tile (16:9-ish).
 const TILE_WIDTH: i32 = 168;
 const TILE_HEIGHT: i32 = 94;
-const THUMB_SIZE: u32 = 336;
-
-/// Decoded thumbnail textures keyed by the favorite's stored path. The
-/// dialog (and thus the page) is rebuilt on every open, and removals
-/// rebuild the whole grid — without this cache every rebuild would
-/// re-decode every image. GdkTexture is immutable and thread-safe
-/// (gdk-rs marks it `Send`), so one process-wide map serves all rebuilds.
-fn thumb_cache() -> &'static Mutex<HashMap<String, Arc<gdk::Texture>>> {
-    static CACHE: OnceLock<Mutex<HashMap<String, Arc<gdk::Texture>>>> = OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
-}
 
 /// Favorites: every wallpaper liked with the heart button, shown as a
 /// grid of thumbnails. Hovering a tile reveals preview and remove actions.
@@ -526,10 +513,8 @@ fn rebuild_favorites_flow(flow: &gtk::FlowBox, empty: &gtk::Label) {
     empty.set_visible(!has_favs);
     // Drop cache entries whose favorite is gone (e.g. removed just now),
     // so the stored files' memory is reclaimed promptly.
-    {
-        let mut cache = thumb_cache().lock().unwrap();
-        cache.retain(|path, _| favs.iter().any(|f| &f.path == path));
-    }
+    let paths: Vec<String> = favs.iter().map(|f| f.path.clone()).collect();
+    crate::ui::thumbnails::retain_only(&paths);
     for fav in favs {
         let flow_weak = flow.downgrade();
         let empty_weak = empty.downgrade();
@@ -561,34 +546,7 @@ fn fav_tile(fav: Favorite, rebuild: Rc<dyn Fn()>) -> gtk::FlowBoxChild {
 
     // Cache hit paints instantly; a miss decodes + downscales off the main
     // thread and stores the texture for the next rebuild/open.
-    let cache_key = fav.path.clone();
-    if let Some(tex) = thumb_cache().lock().unwrap().get(&cache_key).cloned() {
-        picture.set_paintable(Some(tex.as_ref()));
-    } else {
-        let (tx, rx) = async_channel::unbounded::<Result<Vec<u8>, String>>();
-        let path = PathBuf::from(&fav.path);
-        crate::tokio_handle().spawn_blocking(move || {
-            let _ = tx.send_blocking(load_image_jpeg(&path, THUMB_SIZE));
-        });
-        let pic_weak = picture.downgrade();
-        glib::spawn_future_local(async move {
-            if let Ok(loaded) = rx.recv().await {
-                match loaded.and_then(|bytes| {
-                    gdk::Texture::from_bytes(&glib::Bytes::from_owned(bytes))
-                        .map_err(|e| e.to_string())
-                }) {
-                    Ok(tex) => {
-                        let tex = Arc::new(tex);
-                        thumb_cache().lock().unwrap().insert(cache_key, tex.clone());
-                        if let Some(pic) = pic_weak.upgrade() {
-                            pic.set_paintable(Some(tex.as_ref()));
-                        }
-                    }
-                    Err(e) => tracing::warn!("favorite thumbnail failed: {e}"),
-                }
-            }
-        });
-    }
+    crate::ui::thumbnails::load_thumb(&fav.path, &picture);
 
     // Hover actions: reveal only while the pointer is over the tile; the
     // hidden bar must not grab clicks either.
@@ -669,7 +627,7 @@ fn show_preview_dialog(fav: &Favorite, parent: &gtk::Widget) {
     let (tx, rx) = async_channel::unbounded::<Result<Vec<u8>, String>>();
     let path = PathBuf::from(&fav.path);
     crate::tokio_handle().spawn_blocking(move || {
-        let _ = tx.send_blocking(load_image_jpeg(&path, 0));
+        let _ = tx.send_blocking(crate::ui::thumbnails::load_image_jpeg(&path, 0));
     });
     let pic_weak = picture.downgrade();
     glib::spawn_future_local(async move {
@@ -693,27 +651,6 @@ fn show_preview_dialog(fav: &Favorite, parent: &gtk::Widget) {
         .build();
     dialog.set_child(Some(&scroll));
     dialog.present(Some(parent));
-}
-
-/// Decode an image off the UI thread and re-encode it as JPEG bytes that
-/// `gdk::Texture::from_bytes` accepts (it reads PNG/JPEG/TIFF only, while
-/// some sources hand out WebP). `max_size` bounds the larger dimension;
-/// 0 keeps the original size.
-fn load_image_jpeg(path: &Path, max_size: u32) -> Result<Vec<u8>, String> {
-    let img = image::ImageReader::open(path)
-        .and_then(|r| r.with_guessed_format())
-        .map_err(|e| format!("open failed: {e}"))?
-        .decode()
-        .map_err(|e| format!("decode failed: {e}"))?;
-    let img = if max_size > 0 {
-        img.thumbnail(max_size, max_size)
-    } else {
-        img
-    };
-    let mut out = std::io::Cursor::new(Vec::new());
-    img.write_to(&mut out, image::ImageFormat::Jpeg)
-        .map_err(|e| e.to_string())?;
-    Ok(out.into_inner())
 }
 
 fn tile_tooltip(fav: &Favorite) -> String {
