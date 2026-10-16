@@ -424,6 +424,13 @@ impl Window {
                 self.restore_preview();
             }
             Msg::Info(text) => imp.info_label.set_text(&text),
+            Msg::Notice(text) => {
+                // Nothing changed: leave the spinner immediately and surface
+                // the "why" as a transient toast instead.
+                imp.refresh_stack.set_visible_child_name("button");
+                imp.info_label.set_text(&text);
+                imp.toast_overlay.add_toast(adw::Toast::new(&text));
+            }
         }
     }
 }
