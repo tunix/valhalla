@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use std::rc::Rc;
 
 use adw::prelude::*;
@@ -566,10 +565,8 @@ fn fav_tile(fav: Favorite, rebuild: Rc<dyn Fn()>) -> gtk::FlowBoxChild {
     preview_btn.add_css_class("osd");
     preview_btn.set_tooltip_text(Some("Preview"));
     let fav_preview = fav.clone();
-    preview_btn.connect_clicked(move |btn| {
-        if let Some(parent) = btn.root() {
-            show_preview_dialog(&fav_preview, parent.upcast_ref::<gtk::Widget>());
-        }
+    preview_btn.connect_clicked(move |_| {
+        show_preview_window(&fav_preview);
     });
     bar.append(&preview_btn);
 
@@ -610,47 +607,77 @@ fn fav_tile(fav: Favorite, rebuild: Rc<dyn Fn()>) -> gtk::FlowBoxChild {
     child
 }
 
-/// Large preview of a favorite, in a dialog over the preferences window.
-fn show_preview_dialog(fav: &Favorite, parent: &gtk::Widget) {
-    let dialog = adw::Dialog::builder()
+/// Large preview of a favorite, in its own top-level window — unlike a
+/// dialog it is not bounded by the app window, so the image gets the
+/// monitor's size. The window is presented immediately with a spinner;
+/// the (screen-sized) decode happens off-thread and swaps in when ready.
+fn show_preview_window(fav: &Favorite) {
+    let (width, height) = preview_window_size();
+    let window = gtk::Window::builder()
         .title(preview_title(fav))
-        .content_width(800)
-        .content_height(520)
+        .modal(true)
         .build();
+    window.set_default_size(width, height);
+
+    // Transient for the main application window so window managers keep
+    // the preview grouped with (and above) it.
+    let parent = gtk::Window::list_toplevels()
+        .into_iter()
+        .find_map(|w| w.downcast::<adw::ApplicationWindow>().ok());
+    if let Some(parent) = parent {
+        window.set_transient_for(Some(&parent));
+    }
 
     let picture = gtk::Picture::builder()
         .content_fit(gtk::ContentFit::Contain)
+        .can_shrink(true)
+        .hexpand(true)
         .vexpand(true)
         .build();
 
-    // Full-size decode off-thread (no downscale), then the texture swap.
-    let (tx, rx) = async_channel::unbounded::<Result<Vec<u8>, String>>();
-    let path = PathBuf::from(&fav.path);
-    crate::tokio_handle().spawn_blocking(move || {
-        let _ = tx.send_blocking(crate::ui::thumbnails::load_image_jpeg(&path, 0));
-    });
-    let pic_weak = picture.downgrade();
-    glib::spawn_future_local(async move {
-        if let Ok(loaded) = rx.recv().await {
-            let Some(pic) = pic_weak.upgrade() else {
-                return;
-            };
-            match loaded.and_then(|bytes| {
-                gdk::Texture::from_bytes(&glib::Bytes::from_owned(bytes)).map_err(|e| e.to_string())
-            }) {
-                Ok(tex) => pic.set_paintable(Some(&tex)),
-                Err(e) => tracing::warn!("favorite preview failed: {e}"),
-            }
+    // Shown immediately and stopped/hidden again in `on_done`, whichever
+    // way the decode goes — never strand the spinner.
+    let spinner = gtk::Spinner::builder()
+        .spinning(true)
+        .halign(gtk::Align::Center)
+        .valign(gtk::Align::Center)
+        .build();
+
+    let overlay = gtk::Overlay::new();
+    overlay.set_child(Some(&picture));
+    overlay.add_overlay(&spinner);
+
+    window.set_child(Some(&overlay));
+    // Present before decoding: the preview must open instantly.
+    window.present();
+
+    let spinner_weak = spinner.downgrade();
+    crate::ui::thumbnails::load_preview(&fav.path, &picture, move |ok| {
+        if !ok {
+            tracing::warn!("favorite preview failed");
+        }
+        if let Some(spinner) = spinner_weak.upgrade() {
+            spinner.set_spinning(false);
+            spinner.set_visible(false);
         }
     });
+}
 
-    let scroll = gtk::ScrolledWindow::builder()
-        .child(&picture)
-        .hscrollbar_policy(gtk::PolicyType::Never)
-        .vexpand(true)
-        .build();
-    dialog.set_child(Some(&scroll));
-    dialog.present(Some(parent));
+/// Default preview window size: 90% of the primary monitor's geometry
+/// (logical pixels), with a fallback for headless/early startup.
+fn preview_window_size() -> (i32, i32) {
+    const FALLBACK: (i32, i32) = (1200, 800);
+    let Some(display) = gdk::Display::default() else {
+        return FALLBACK;
+    };
+    let Some(monitor) = display.monitors().item(0).and_downcast::<gdk::Monitor>() else {
+        return FALLBACK;
+    };
+    let geometry = monitor.geometry();
+    (
+        geometry.width().max(1) * 9 / 10,
+        geometry.height().max(1) * 9 / 10,
+    )
 }
 
 fn tile_tooltip(fav: &Favorite) -> String {

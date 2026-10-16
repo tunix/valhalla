@@ -1,5 +1,7 @@
 //! Off-thread thumbnail decoding for favorites, with a three-tier cache:
 //! in-memory textures, on-disk thumbnails and the stored wallpaper itself.
+//! Full previews (for the favorites preview window) use the same disk dir
+//! under a `.preview.jpg` suffix and a single-slot memory cache.
 //!
 //! The Preferences dialog (and thus the favorites grid) is rebuilt on every
 //! open, and removals rebuild the whole grid — without a cache every rebuild
@@ -33,20 +35,66 @@ fn disk_dir() -> std::path::PathBuf {
     dir
 }
 
-/// On-disk thumbnail for a stored favorite: favorites live at
+/// On-disk cache file for a stored favorite: favorites live at
 /// `<id>.<ext>`, thumbnails at `thumbs/<id>.jpg` (stable across runs).
-fn disk_path_for(stored: &Path) -> std::path::PathBuf {
+/// `variant` is a suffix between stem and `.jpg` — `""` for thumbnails,
+/// `.preview` for full previews (`thumbs/<id>.preview.jpg`).
+fn disk_path_for(stored: &Path, variant: &str) -> std::path::PathBuf {
     let stem = stored
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or_default();
-    disk_dir().join(format!("{stem}.jpg"))
+    disk_dir().join(format!("{stem}{variant}.jpg"))
+}
+
+/// On-disk preview for a stored favorite: `thumbs/<id>.preview.jpg`.
+fn preview_disk_path(stored: &Path) -> std::path::PathBuf {
+    disk_path_for(stored, ".preview")
+}
+
+/// Decode budget for previews: the primary monitor's long edge in device
+/// pixels. A screen-sized decode is fast and looks identical on screen —
+/// the full source resolution only costs time. Falls back to 2560 when no
+/// monitor geometry is available yet.
+fn preview_budget() -> u32 {
+    const FALLBACK: u32 = 2560;
+    let Some(display) = gdk::Display::default() else {
+        return FALLBACK;
+    };
+    let monitor = display.monitors().item(0).and_downcast::<gdk::Monitor>();
+    let Some(monitor) = monitor else {
+        return FALLBACK;
+    };
+    let geometry = monitor.geometry();
+    // Geometry is in logical pixels; decode in device pixels so HiDPI
+    // screens don't get an upscaled-looking preview.
+    let scale = monitor.scale_factor().max(1);
+    let long_edge = geometry.width().max(geometry.height()).max(1);
+    long_edge as u32 * scale as u32
+}
+
+/// Single-slot memory cache for the LAST preview only: full-size textures
+/// are memory-heavy, so unlike the thumbnail map this holds at most one.
+type PreviewSlot = Option<(String, Arc<gdk::Texture>)>;
+
+fn preview_slot() -> &'static Mutex<PreviewSlot> {
+    static SLOT: OnceLock<Mutex<PreviewSlot>> = OnceLock::new();
+    SLOT.get_or_init(|| Mutex::new(None))
+}
+
+/// Preview texture from the on-disk preview cache, if readable/decodable.
+/// Also seeds the single-slot memory cache so the next open is a plain hit.
+fn preview_from_disk(path: &str) -> Option<Arc<gdk::Texture>> {
+    let bytes = std::fs::read(preview_disk_path(Path::new(path))).ok()?;
+    let tex = Arc::new(gdk::Texture::from_bytes(&glib::Bytes::from_owned(bytes)).ok()?);
+    *preview_slot().lock().unwrap() = Some((path.to_string(), tex.clone()));
+    Some(tex)
 }
 
 /// Thumbnail texture from the disk cache, if readable/decodable. Also
 /// seeds the in-memory cache so the next lookup is a plain hit.
 fn texture_from_disk(path: &str) -> Option<Arc<gdk::Texture>> {
-    let bytes = std::fs::read(disk_path_for(Path::new(path))).ok()?;
+    let bytes = std::fs::read(disk_path_for(Path::new(path), "")).ok()?;
     let tex = gdk::Texture::from_bytes(&glib::Bytes::from_owned(bytes)).ok()?;
     let tex = Arc::new(tex);
     cache()
@@ -58,12 +106,21 @@ fn texture_from_disk(path: &str) -> Option<Arc<gdk::Texture>> {
 
 /// Drop cache entries whose path is not among `kept` (e.g. the favorite
 /// was just removed): memory is reclaimed promptly and orphan on-disk
-/// thumbnails are unlinked so the cache dir stays honest.
+/// thumbnails and previews are unlinked so the cache dir stays honest.
 pub fn retain_only(kept: &[String]) {
     cache()
         .lock()
         .unwrap()
         .retain(|path, _| kept.contains(path));
+    // The preview slot holds at most one entry — drop it if its favorite
+    // is gone.
+    let mut slot = preview_slot().lock().unwrap();
+    if let Some((path, _)) = slot.as_ref() {
+        if !kept.contains(path) {
+            *slot = None;
+        }
+    }
+    drop(slot);
     let kept_stems: std::collections::HashSet<&str> = kept
         .iter()
         .filter_map(|p| Path::new(p).file_stem().and_then(|s| s.to_str()))
@@ -71,10 +128,17 @@ pub fn retain_only(kept: &[String]) {
     if let Ok(entries) = std::fs::read_dir(disk_dir()) {
         for entry in entries.flatten() {
             let path = entry.path();
-            let stem = path
-                .file_stem()
+            // `file_stem` of "abc.preview.jpg" is "abc.preview", so strip
+            // both cache-file suffixes explicitly before comparing with
+            // the favorites' stems.
+            let name = path
+                .file_name()
                 .and_then(|s| s.to_str())
                 .unwrap_or_default();
+            let stem = name
+                .strip_suffix(".preview.jpg")
+                .or_else(|| name.strip_suffix(".jpg"))
+                .unwrap_or(name);
             if !kept_stems.contains(stem) {
                 let _ = std::fs::remove_file(&path);
             }
@@ -94,7 +158,7 @@ pub fn load_thumb(path: &str, picture: &gtk::Picture) {
         picture.set_paintable(Some(tex.as_ref()));
         return;
     }
-    let disk = disk_path_for(Path::new(path));
+    let disk = disk_path_for(Path::new(path), "");
     let rx = spawn_decode(Path::new(path), THUMB_SIZE, Some(disk));
     let pic = picture.downgrade();
     let key = path.to_string();
@@ -118,12 +182,77 @@ pub fn prewarm(path: &str) {
     if texture_from_disk(path).is_some() {
         return;
     }
-    let disk = disk_path_for(Path::new(path));
+    let disk = disk_path_for(Path::new(path), "");
     let rx = spawn_decode(Path::new(path), THUMB_SIZE, Some(disk));
     let key = path.to_string();
     glib::spawn_future_local(async move {
         let _ = await_texture(key, rx).await;
     });
+}
+
+/// Paint `picture` with a screen-sized preview of `path` and report
+/// completion via `on_done` (exactly once, success or failure — the caller
+/// must use it to stop its spinner).
+///
+/// Order of speed: single-slot memory hit → on-disk preview cache →
+/// off-thread decode at the monitor-sized budget (persisted to
+/// `thumbs/<id>.preview.jpg` for future runs).
+pub fn load_preview(path: &str, picture: &gtk::Picture, on_done: impl Fn(bool) + 'static) {
+    // Lookups are split into separate statements on purpose: a guard
+    // temporary in an `if let` scrutinee or `a || b` condition lives until
+    // the end of the whole expression, so chaining a lookup into a call
+    // that re-locks the same mutex deadlocks.
+    let cached = preview_slot().lock().unwrap().clone();
+    if let Some((key, tex)) = cached {
+        if key == path {
+            picture.set_paintable(Some(tex.as_ref()));
+            on_done(true);
+            return;
+        }
+    }
+    if let Some(tex) = preview_from_disk(path) {
+        picture.set_paintable(Some(tex.as_ref()));
+        on_done(true);
+        return;
+    }
+    let disk = preview_disk_path(Path::new(path));
+    let rx = spawn_decode(Path::new(path), preview_budget(), Some(disk));
+    let pic = picture.downgrade();
+    let key = path.to_string();
+    glib::spawn_future_local(async move {
+        let tex = await_preview_texture(key, rx).await;
+        if let Some(pic) = pic.upgrade() {
+            if let Some(tex) = &tex {
+                pic.set_paintable(Some(tex.as_ref()));
+            }
+        }
+        on_done(tex.is_some());
+    });
+}
+
+/// Await decoded preview bytes, turn them into a texture and store it in
+/// the single-slot preview cache. Returns the texture so the caller can
+/// paint immediately.
+async fn await_preview_texture(
+    key: String,
+    rx: async_channel::Receiver<Result<Vec<u8>, String>>,
+) -> Option<Arc<gdk::Texture>> {
+    let Ok(loaded) = rx.recv().await else {
+        return None;
+    };
+    match loaded.and_then(|bytes| {
+        gdk::Texture::from_bytes(&glib::Bytes::from_owned(bytes)).map_err(|e| e.to_string())
+    }) {
+        Ok(tex) => {
+            let tex = Arc::new(tex);
+            *preview_slot().lock().unwrap() = Some((key, tex.clone()));
+            Some(tex)
+        }
+        Err(e) => {
+            tracing::warn!("preview decode failed: {e}");
+            None
+        }
+    }
 }
 
 /// Kick off a blocking decode; results arrive as JPEG bytes on `rx`.
