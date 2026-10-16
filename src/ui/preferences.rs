@@ -1,7 +1,10 @@
-use adw::prelude::*;
-use gtk::{gio, glib};
+use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
-use crate::credentials;
+use adw::prelude::*;
+use gtk::{gdk, gio, glib};
+
+use crate::{credentials, favorites::Favorite};
 
 const INTERVAL_MINUTES: [u32; 5] = [0, 15, 60, 360, 1440];
 const INTERVAL_LABELS: [&str; 5] = [
@@ -36,12 +39,18 @@ const CONTENT_FILTER_VALUES: [&str; 2] = ["low", "high"];
 const CONTENT_FILTER_LABELS: [&str; 2] = ["Low (moderate)", "High (strict)"];
 
 /// Sidebar entries: (stack name, label, icon). Order = sidebar order.
-const SIDEBAR: [(&str, &str, &str, &str); 8] = [
+const SIDEBAR: [(&str, &str, &str, &str); 9] = [
     (
         "general",
         "General",
         "source-general",
         "Refresh schedule and behavior",
+    ),
+    (
+        "favorites",
+        "Favorites",
+        "valhalla-heart-symbolic",
+        "Wallpapers you liked with the heart button",
     ),
     (
         "wallhaven",
@@ -111,6 +120,7 @@ pub fn build(settings: &gio::Settings) -> adw::Dialog {
     };
 
     pages.add(&general_page(settings));
+    pages.add(&favorites_page());
 
     let (wh_page, wh_key_row, nsfw_row, _purity_rows) = wallhaven_page(settings);
     pages.add(&wh_page);
@@ -444,6 +454,254 @@ fn general_page(settings: &gio::Settings) -> adw::PreferencesPage {
     behavior_group.add(&login);
 
     page
+}
+
+/// Size of one grid tile (16:9-ish) and its 2× HiDPI thumbnail budget.
+const TILE_WIDTH: i32 = 168;
+const TILE_HEIGHT: i32 = 94;
+const THUMB_SIZE: u32 = 336;
+
+/// Favorites: every wallpaper liked with the heart button, shown as a
+/// grid of thumbnails. Hovering a tile reveals preview and remove actions.
+fn favorites_page() -> adw::PreferencesPage {
+    let page = adw::PreferencesPage::new();
+    page.set_title("Favorites");
+
+    let group = adw::PreferencesGroup::new();
+    group.set_title("Liked wallpapers");
+    group.set_description(Some(
+        "Wallpapers you liked with the heart button are stored locally and cycle offline.",
+    ));
+    page.add(&group);
+
+    let empty = gtk::Label::builder()
+        .label("No favorites yet — like a wallpaper with the heart button")
+        .wrap(true)
+        .xalign(0.0)
+        .css_classes(["dimmed"])
+        .build();
+    group.add(&empty);
+
+    let flow = gtk::FlowBox::builder()
+        .selection_mode(gtk::SelectionMode::None)
+        .min_children_per_line(2)
+        .max_children_per_line(3)
+        .column_spacing(12)
+        .row_spacing(12)
+        .build();
+    group.add(&flow);
+
+    // The dialog is rebuilt on every open, so a single fill here is always
+    // fresh; afterwards the grid only rebuilds itself on removals.
+    rebuild_favorites_flow(&flow, &empty);
+
+    page
+}
+
+/// Refill the grid from the persisted favorites list.
+fn rebuild_favorites_flow(flow: &gtk::FlowBox, empty: &gtk::Label) {
+    while let Some(child) = flow.first_child() {
+        flow.remove(&child);
+    }
+    let favs = crate::favorites::list();
+    let has_favs = !favs.is_empty();
+    flow.set_visible(has_favs);
+    empty.set_visible(!has_favs);
+    for fav in favs {
+        let flow_weak = flow.downgrade();
+        let empty_weak = empty.downgrade();
+        let rebuild = Rc::new(move || {
+            if let (Some(flow), Some(empty)) = (flow_weak.upgrade(), empty_weak.upgrade()) {
+                rebuild_favorites_flow(&flow, &empty);
+            }
+        }) as Rc<dyn Fn()>;
+        flow.append(&fav_tile(fav, rebuild));
+    }
+}
+
+/// One grid tile: local thumbnail, hover actions to preview and un-like.
+fn fav_tile(fav: Favorite, rebuild: Rc<dyn Fn()>) -> gtk::FlowBoxChild {
+    let child = gtk::FlowBoxChild::new();
+
+    let tile = gtk::Overlay::builder()
+        .width_request(TILE_WIDTH)
+        .height_request(TILE_HEIGHT)
+        .tooltip_text(tile_tooltip(&fav))
+        .build();
+
+    let picture = gtk::Picture::builder()
+        .content_fit(gtk::ContentFit::Cover)
+        .can_shrink(true)
+        .css_classes(["fav-thumb"])
+        .build();
+    tile.set_child(Some(&picture));
+
+    // Decode + downscale off the main thread; the callback swaps in the
+    // texture when it arrives.
+    let (tx, rx) = async_channel::unbounded::<Result<Vec<u8>, String>>();
+    let path = PathBuf::from(&fav.path);
+    crate::tokio_handle().spawn_blocking(move || {
+        let _ = tx.send_blocking(load_image_jpeg(&path, THUMB_SIZE));
+    });
+    let pic_weak = picture.downgrade();
+    glib::spawn_future_local(async move {
+        if let Ok(loaded) = rx.recv().await {
+            let Some(pic) = pic_weak.upgrade() else {
+                return;
+            };
+            match loaded.and_then(|bytes| {
+                gdk::Texture::from_bytes(&glib::Bytes::from_owned(bytes)).map_err(|e| e.to_string())
+            }) {
+                Ok(tex) => pic.set_paintable(Some(&tex)),
+                Err(e) => tracing::warn!("favorite thumbnail failed: {e}"),
+            }
+        }
+    });
+
+    // Hover actions: reveal only while the pointer is over the tile; the
+    // hidden bar must not grab clicks either.
+    let bar = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(6)
+        .halign(gtk::Align::End)
+        .valign(gtk::Align::End)
+        .margin_end(6)
+        .margin_bottom(6)
+        .css_classes(["fav-overlay"])
+        .can_target(false)
+        .build();
+    tile.add_overlay(&bar);
+
+    let preview_btn = gtk::Button::from_icon_name("view-fullscreen-symbolic");
+    preview_btn.add_css_class("osd");
+    preview_btn.set_tooltip_text(Some("Preview"));
+    let fav_preview = fav.clone();
+    preview_btn.connect_clicked(move |btn| {
+        if let Some(parent) = btn.root() {
+            show_preview_dialog(&fav_preview, parent.upcast_ref::<gtk::Widget>());
+        }
+    });
+    bar.append(&preview_btn);
+
+    let remove_btn = gtk::Button::from_icon_name("user-trash-symbolic");
+    remove_btn.add_css_class("osd");
+    remove_btn.set_tooltip_text(Some("Remove from Favorites"));
+    let fav_id = fav.id.clone();
+    remove_btn.connect_clicked(move |_| {
+        let (done_tx, done_rx) = async_channel::unbounded::<Result<(), String>>();
+        let id = fav_id.clone();
+        crate::tokio_handle().spawn_blocking(move || {
+            let _ = done_tx.send_blocking(crate::favorites::remove(&id));
+        });
+        let rebuild = rebuild.clone();
+        glib::spawn_future_local(async move {
+            if let Ok(Err(e)) = done_rx.recv().await {
+                tracing::warn!("failed to remove favorite: {e}");
+            }
+            rebuild();
+        });
+    });
+    bar.append(&remove_btn);
+
+    let motion = gtk::EventControllerMotion::new();
+    let bar_enter = bar.clone();
+    let bar_leave = bar.clone();
+    motion.connect_enter(move |_, _, _| {
+        bar_enter.set_can_target(true);
+        bar_enter.add_css_class("hovered");
+    });
+    motion.connect_leave(move |_| {
+        bar_leave.set_can_target(false);
+        bar_leave.remove_css_class("hovered");
+    });
+    tile.add_controller(motion);
+
+    child.set_child(Some(&tile));
+    child
+}
+
+/// Large preview of a favorite, in a dialog over the preferences window.
+fn show_preview_dialog(fav: &Favorite, parent: &gtk::Widget) {
+    let dialog = adw::Dialog::builder()
+        .title(preview_title(fav))
+        .content_width(800)
+        .content_height(520)
+        .build();
+
+    let picture = gtk::Picture::builder()
+        .content_fit(gtk::ContentFit::Contain)
+        .vexpand(true)
+        .build();
+
+    // Full-size decode off-thread (no downscale), then the texture swap.
+    let (tx, rx) = async_channel::unbounded::<Result<Vec<u8>, String>>();
+    let path = PathBuf::from(&fav.path);
+    crate::tokio_handle().spawn_blocking(move || {
+        let _ = tx.send_blocking(load_image_jpeg(&path, 0));
+    });
+    let pic_weak = picture.downgrade();
+    glib::spawn_future_local(async move {
+        if let Ok(loaded) = rx.recv().await {
+            let Some(pic) = pic_weak.upgrade() else {
+                return;
+            };
+            match loaded.and_then(|bytes| {
+                gdk::Texture::from_bytes(&glib::Bytes::from_owned(bytes)).map_err(|e| e.to_string())
+            }) {
+                Ok(tex) => pic.set_paintable(Some(&tex)),
+                Err(e) => tracing::warn!("favorite preview failed: {e}"),
+            }
+        }
+    });
+
+    let scroll = gtk::ScrolledWindow::builder()
+        .child(&picture)
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .vexpand(true)
+        .build();
+    dialog.set_child(Some(&scroll));
+    dialog.present(Some(parent));
+}
+
+/// Decode an image off the UI thread and re-encode it as JPEG bytes that
+/// `gdk::Texture::from_bytes` accepts (it reads PNG/JPEG/TIFF only, while
+/// some sources hand out WebP). `max_size` bounds the larger dimension;
+/// 0 keeps the original size.
+fn load_image_jpeg(path: &Path, max_size: u32) -> Result<Vec<u8>, String> {
+    let img = image::ImageReader::open(path)
+        .and_then(|r| r.with_guessed_format())
+        .map_err(|e| format!("open failed: {e}"))?
+        .decode()
+        .map_err(|e| format!("decode failed: {e}"))?;
+    let img = if max_size > 0 {
+        img.thumbnail(max_size, max_size)
+    } else {
+        img
+    };
+    let mut out = std::io::Cursor::new(Vec::new());
+    img.write_to(&mut out, image::ImageFormat::Jpeg)
+        .map_err(|e| e.to_string())?;
+    Ok(out.into_inner())
+}
+
+fn tile_tooltip(fav: &Favorite) -> String {
+    let mut parts = Vec::new();
+    if let Some(title) = fav.title.as_deref().filter(|t| !t.is_empty()) {
+        parts.push(title.to_string());
+    }
+    if let Some(author) = fav.author.as_deref().filter(|a| !a.is_empty()) {
+        parts.push(format!("by {author}"));
+    }
+    parts.push(fav.source.clone());
+    parts.join(" · ")
+}
+
+fn preview_title(fav: &Favorite) -> String {
+    fav.title
+        .as_deref()
+        .filter(|t| !t.is_empty())
+        .unwrap_or("Favorite wallpaper")
+        .to_string()
 }
 
 fn wallhaven_page(
