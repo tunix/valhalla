@@ -497,7 +497,10 @@ fn favorites_page() -> adw::PreferencesPage {
     let clear_btn = gtk::Button::builder()
         .label("Clear All")
         .css_classes(["destructive-action"])
-        .halign(gtk::Align::End)
+        // Centered under the grid with breathing room, per GNOME HIG
+        // spacing: it is a page-level action, not tied to the last tile.
+        .halign(gtk::Align::Center)
+        .margin_top(12)
         .sensitive(false) // enabled by the rebuild below when there is anything to clear
         .build();
     group.add(&clear_btn);
