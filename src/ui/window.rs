@@ -100,11 +100,10 @@ impl Window {
         let _ = imp.settings.set(settings.clone());
         let _ = imp.trig.set(trig);
 
-        window.restore_window_size();
+        window.setup_geometry_persistence();
         window.setup_dropdown();
         window.setup_actions();
         window.setup_close();
-        window.watch_size_changes();
         window.watch_settings();
         window.update_banner();
         window.restore_preview();
@@ -285,9 +284,6 @@ impl Window {
             let Some(window) = win.upgrade() else {
                 return glib::Propagation::Proceed;
             };
-            // Remember the geometry whether we hide to the background or
-            // really close, so the next open comes back at the same size.
-            window.save_window_size();
             if settings.boolean("run-in-background") {
                 // Keep the process alive for scheduled refreshes; the menu's
                 // Quit action exits fully.
@@ -298,82 +294,23 @@ impl Window {
                 glib::Propagation::Proceed
             }
         });
-        // Unrealize also covers the `app.quit()` path, where close-request
-        // never fires even though the window goes away.
-        self.connect_unrealize(|window| window.save_window_size());
     }
 
-    /// Restore the window size and maximized state persisted by
-    /// `save_window_size`; the Blueprint defaults apply when nothing
-    /// sensible was saved yet.
-    fn restore_window_size(&self) {
+    /// Persist the window geometry with GTK's own mechanism: GTK 4 tracks
+    /// interactive resizes in `default-width`/`default-height`
+    /// (surface_size_changed → set_default_size_internal) and the window
+    /// state in `maximized`, so plain GSettings binds both restore at
+    /// construction and save continuously. A hard kill (Ctrl+C on
+    /// `cargo run`) keeps the last size, unlike close-time saves which
+    /// never run in that case. GTK itself skips remembering while the
+    /// window is maximized/tiled/fullscreened.
+    fn setup_geometry_persistence(&self) {
         let settings = self.imp().settings.get().unwrap();
-        let (w, h) = (settings.int("window-width"), settings.int("window-height"));
-        if w > 0 && h > 0 {
-            self.set_default_size(w, h);
-        }
-        if settings.boolean("window-maximized") {
-            self.maximize();
-        }
-    }
-
-    /// Persist the window geometry for the next session. The size is only
-    /// saved while unmaximized: a maximized window reports its full monitor
-    /// size, and restoring that later would pin the unmaximized window to
-    /// those dimensions. The maximized flag itself is always saved.
-    fn save_window_size(&self) {
-        let settings = self.imp().settings.get().unwrap();
-        let maximized = self.is_maximized();
-        let (w, h) = (self.width(), self.height());
-        // A hidden or being-destroyed window can report a bogus 1×1
-        // allocation; saving that would come back as a tiny window next
-        // launch. The real minimum is 360×300 (width/height-request), so
-        // anything under ~100 was not a size anyone chose.
-        if !maximized && w > 100 && h > 100 {
-            let _ = settings.set_int("window-width", w);
-            let _ = settings.set_int("window-height", h);
-        }
-        let _ = settings.set_boolean("window-maximized", maximized);
-    }
-
-    /// Persist interactive resizes with a short debounce. Close-request and
-    /// unrealize never run when the app is killed outright (Ctrl+C on
-    /// `cargo run`, a crash), which is the everyday dev loop — without this
-    /// watch the size would never be saved at all.
-    fn watch_size_changes(&self) {
-        use std::cell::RefCell;
-        use std::rc::Rc;
-
-        let win = self.downgrade();
-        let pending: Rc<RefCell<Option<glib::SourceId>>> = Rc::new(RefCell::new(None));
-        for prop in ["width", "height"] {
-            let win = win.clone();
-            let pending = Rc::clone(&pending);
-            self.connect_notify_local(Some(prop), move |_, _| {
-                let Some(window) = win.upgrade() else {
-                    return;
-                };
-                if !window.is_visible() || window.is_maximized() {
-                    return; // layout noise or maximized geometry — not a chosen size
-                }
-                // Debounce: save once the window has held still for a
-                // moment, not on every drag pixel.
-                if let Some(id) = pending.borrow_mut().take() {
-                    id.remove();
-                }
-                let win = win.clone();
-                let pending_for_timer = Rc::clone(&pending);
-                let id =
-                    glib::timeout_add_local(std::time::Duration::from_millis(400), move || {
-                        *pending_for_timer.borrow_mut() = None;
-                        if let Some(window) = win.upgrade() {
-                            window.save_window_size();
-                        }
-                        glib::ControlFlow::Break
-                    });
-                *pending.borrow_mut() = Some(id);
-            });
-        }
+        settings.bind("window-width", self, "default-width").build();
+        settings
+            .bind("window-height", self, "default-height")
+            .build();
+        settings.bind("window-maximized", self, "maximized").build();
     }
 
     fn watch_settings(&self) {
