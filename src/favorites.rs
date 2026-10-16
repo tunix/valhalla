@@ -182,6 +182,19 @@ pub fn remove(id: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Remove every favorite: stored copies, analysis thumbnails, list. Used
+/// by the "clear all" action in Preferences; the UI's on-disk thumbnail /
+/// preview caches are cleaned up by its `retain_only` on the next rebuild.
+pub fn clear() -> Result<(), String> {
+    let favs = list();
+    save_list(&[])?;
+    for fav in favs {
+        let _ = std::fs::remove_file(&fav.path); // list already emptied
+        let _ = std::fs::remove_file(thumb_path(&fav.id));
+    }
+    Ok(())
+}
+
 /// Present favorites as refreshable candidates. Each entry cycles from the
 /// local copy — no network. Theme matching decodes the candidate's
 /// thumbnail (a small pre-scaled copy, generated once on first use), not
@@ -430,6 +443,18 @@ mod tests {
         assert!(!name.contains(['/', ':', '*']), "sanitized name: {name}");
         assert!(name.starts_with("photo_with_weird_chars"));
         remove(&favs.last().unwrap().id).ok();
+
+        // clear() wipes everything: list, stored copies, analysis thumbs
+        add("c1", "unsplash", &src, None, None, None).expect("add c1");
+        add("c2", "unsplash", &src, None, None, None).expect("add c2");
+        let c1_path = PathBuf::from(&list()[0].path);
+        clear().expect("clear");
+        assert!(list().is_empty());
+        assert!(!contains("c1") && !contains("c2"));
+        assert!(!c1_path.exists(), "clear removes stored copies");
+        assert!(!thumb_path("c1").exists(), "clear removes analysis thumbs");
+        // clear on an empty list is a no-op
+        clear().expect("clear empty");
 
         std::fs::remove_dir_all(&tmp).ok();
         std::env::remove_var("XDG_DATA_HOME");

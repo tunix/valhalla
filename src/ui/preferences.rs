@@ -494,15 +494,69 @@ fn favorites_page() -> adw::PreferencesPage {
         .build();
     group.add(&flow);
 
+    let clear_btn = gtk::Button::builder()
+        .label("Clear All")
+        .css_classes(["destructive-action"])
+        .halign(gtk::Align::End)
+        .sensitive(false) // enabled by the rebuild below when there is anything to clear
+        .build();
+    group.add(&clear_btn);
+
     // The dialog is rebuilt on every open, so a single fill here is always
     // fresh; afterwards the grid only rebuilds itself on removals.
-    rebuild_favorites_flow(&flow, &empty);
+    rebuild_favorites_flow(&flow, &empty, &clear_btn);
+
+    // Destructive: confirm before wiping every favorite.
+    {
+        let flow_weak = flow.downgrade();
+        let empty_weak = empty.downgrade();
+        let btn_weak = clear_btn.downgrade();
+        clear_btn.connect_clicked(move |btn| {
+            let Some(parent) = btn.root().map(|r| r.upcast_ref::<gtk::Widget>().clone()) else {
+                return;
+            };
+            let dialog = adw::AlertDialog::builder()
+                .heading("Clear all favorites?")
+                .body("Every liked wallpaper will be removed. This cannot be undone.")
+                .build();
+            dialog.add_response("cancel", "Cancel");
+            dialog.add_response("clear", "Clear All");
+            dialog.set_response_appearance("clear", adw::ResponseAppearance::Destructive);
+            dialog.set_default_response(Some("cancel"));
+            dialog.set_close_response("cancel");
+            let flow_weak = flow_weak.clone();
+            let empty_weak = empty_weak.clone();
+            let btn_weak = btn_weak.clone();
+            dialog.connect_response(Some("clear"), move |_, _| {
+                let (done_tx, done_rx) = async_channel::unbounded::<Result<(), String>>();
+                crate::tokio_handle().spawn_blocking(move || {
+                    let _ = done_tx.send_blocking(crate::favorites::clear());
+                });
+                let flow_weak = flow_weak.clone();
+                let empty_weak = empty_weak.clone();
+                let btn_weak = btn_weak.clone();
+                glib::spawn_future_local(async move {
+                    if let Ok(Err(e)) = done_rx.recv().await {
+                        tracing::warn!("failed to clear favorites: {e}");
+                    }
+                    if let (Some(flow), Some(empty), Some(clear_btn)) = (
+                        flow_weak.upgrade(),
+                        empty_weak.upgrade(),
+                        btn_weak.upgrade(),
+                    ) {
+                        rebuild_favorites_flow(&flow, &empty, &clear_btn);
+                    }
+                });
+            });
+            dialog.present(Some(&parent));
+        });
+    }
 
     page
 }
 
 /// Refill the grid from the persisted favorites list.
-fn rebuild_favorites_flow(flow: &gtk::FlowBox, empty: &gtk::Label) {
+fn rebuild_favorites_flow(flow: &gtk::FlowBox, empty: &gtk::Label, clear_btn: &gtk::Button) {
     while let Some(child) = flow.first_child() {
         flow.remove(&child);
     }
@@ -510,6 +564,7 @@ fn rebuild_favorites_flow(flow: &gtk::FlowBox, empty: &gtk::Label) {
     let has_favs = !favs.is_empty();
     flow.set_visible(has_favs);
     empty.set_visible(!has_favs);
+    clear_btn.set_sensitive(has_favs);
     // Drop cache entries whose favorite is gone (e.g. removed just now),
     // so the stored files' memory is reclaimed promptly.
     let paths: Vec<String> = favs.iter().map(|f| f.path.clone()).collect();
@@ -520,9 +575,14 @@ fn rebuild_favorites_flow(flow: &gtk::FlowBox, empty: &gtk::Label) {
     for fav in favs {
         let flow_weak = flow.downgrade();
         let empty_weak = empty.downgrade();
+        let btn_weak = clear_btn.downgrade();
         let rebuild = Rc::new(move || {
-            if let (Some(flow), Some(empty)) = (flow_weak.upgrade(), empty_weak.upgrade()) {
-                rebuild_favorites_flow(&flow, &empty);
+            if let (Some(flow), Some(empty), Some(clear_btn)) = (
+                flow_weak.upgrade(),
+                empty_weak.upgrade(),
+                btn_weak.upgrade(),
+            ) {
+                rebuild_favorites_flow(&flow, &empty, &clear_btn);
             }
         }) as Rc<dyn Fn()>;
         flow.append(&fav_tile(fav, rebuild));
