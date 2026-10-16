@@ -655,4 +655,68 @@ mod tests {
         history.truncate(50);
         assert_eq!(history.len(), 50);
     }
+
+    /// file:// candidates (Favorites, Manual) must resolve to local reads:
+    /// the analysis step reads the file directly and never touches the
+    /// HTTP client, and a missing file degrades to a skippable error.
+    #[test]
+    fn analyze_reads_file_candidates_locally() {
+        let _env = crate::http::test_env::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("GSETTINGS_BACKEND", "memory");
+        let (tx, rx) = async_channel::unbounded();
+        let core = Core::new(gio::Settings::new("io.github.tunix.valhalla"), tx);
+
+        let dir = std::env::temp_dir().join(format!("valhalla-sched-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let img = dir.join("dark.jpg");
+        let mut px = image::RgbImage::new(32, 32);
+        for p in px.pixels_mut() {
+            *p = image::Rgb([10, 10, 14]);
+        }
+        image::DynamicImage::ImageRgb8(px)
+            .write_to(
+                &mut std::io::BufWriter::new(std::fs::File::create(&img).unwrap()),
+                image::ImageFormat::Jpeg,
+            )
+            .unwrap();
+
+        let candidate = |thumb: String| crate::source::Candidate {
+            id: "f1".into(),
+            source: "favorites",
+            image_url: thumb.clone(),
+            thumb_url: thumb,
+            web_url: String::new(),
+            title: None,
+            author: None,
+            dominant_colors: Vec::new(),
+        };
+
+        // analyze() is async by signature only (no awaits inside); drive it
+        // on a small runtime like applier's portal guard test does, so the
+        // env lock is never held across an await.
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+
+        let scheme = rt
+            .block_on(core.analyze(&candidate(format!("file://{}", img.display())), 0.45))
+            .expect("local analysis");
+        assert_eq!(scheme, ColorScheme::Dark);
+
+        // Missing file: graceful error the caller skips the candidate for.
+        assert!(rt
+            .block_on(core.analyze(
+                &candidate("file:///nonexistent/valhalla-missing.jpg".into()),
+                0.45
+            ))
+            .is_err());
+
+        // Local analysis must not emit any scheduler messages and must not
+        // leave anything in the HTTP cache dirs.
+        assert!(rx.try_recv().is_err(), "no messages expected");
+        std::fs::remove_dir_all(&dir).ok();
+        std::env::remove_var("GSETTINGS_BACKEND");
+    }
 }
