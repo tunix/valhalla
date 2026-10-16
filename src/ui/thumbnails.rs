@@ -86,13 +86,11 @@ pub fn retain_only(kept: &[String]) {
 /// in-memory cache or the disk cache, or decoded off-thread on a full
 /// miss (persisted for future runs, stored for next time).
 pub fn load_thumb(path: &str, picture: &gtk::Picture) {
-    if let Some(tex) = cache()
-        .lock()
-        .unwrap()
-        .get(path)
-        .cloned()
-        .or_else(|| texture_from_disk(path))
-    {
+    // Split lookups so the mutex guard is dropped before `texture_from_disk`
+    // re-locks the cache (a guard temporary in an `if let` scrutinee would
+    // otherwise outlive into the `or_else` and deadlock).
+    let cached = cache().lock().unwrap().get(path).cloned();
+    if let Some(tex) = cached.or_else(|| texture_from_disk(path)) {
         picture.set_paintable(Some(tex.as_ref()));
         return;
     }
@@ -112,7 +110,12 @@ pub fn load_thumb(path: &str, picture: &gtk::Picture) {
 /// Pre-decode a thumbnail in the background so a later grid open paints
 /// instantly. Called when a wallpaper is liked; a cache hit is a no-op.
 pub fn prewarm(path: &str) {
-    if cache().lock().unwrap().contains_key(path) || texture_from_disk(path).is_some() {
+    // Same guard-vs-relock hazard as in `load_thumb`: the two lookups must
+    // not share one condition expression.
+    if cache().lock().unwrap().contains_key(path) {
+        return;
+    }
+    if texture_from_disk(path).is_some() {
         return;
     }
     let disk = disk_path_for(Path::new(path));
