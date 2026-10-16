@@ -58,12 +58,28 @@ fn main() {
     xml.push_str(&format!(
         r#"<file compressed="true" alias="icons/hicolor/scalable/apps/{heart}">{heart}</file>"#,
     ));
-    xml.push_str("</gresource></gresources>");
+    // Brand logos for the Preferences sidebar (per-source pages). Full-color,
+    // embedded for the same sandbox reason as the heart icon.
+    let sources_dir = icon_dir.clone(); // logos live in apps/ alongside the heart icon
+    println!("cargo:rerun-if-changed={}", sources_dir.display());
+    for entry in std::fs::read_dir(&sources_dir).expect("read sources icon dir") {
+        let path = entry.expect("source icon entry").path();
+        if path.extension().and_then(|e| e.to_str()) == Some("svg") {
+            let name = path.file_name().unwrap().to_str().unwrap().to_string();
+            if name == heart || name == "io.github.tunix.valhalla.svg" {
+                continue; // already listed above
+            }
+            xml.push_str(&format!(
+                r#"<file compressed="true" alias="icons/hicolor/scalable/apps/{name}">{name}</file>"#,
+            ));
+        }
+    }
+    xml.push_str(r#"</gresource></gresources>"#);
     let gxml = out.join("valhalla.gresources.xml");
     fs::write(&gxml, xml).expect("write gresource xml");
 
     glib_build_tools::compile_resources(
-        &[out, icon_dir, action_dir],
+        &[out, icon_dir, action_dir, sources_dir],
         gxml.to_str().unwrap(),
         "valhalla.gresource",
     );
