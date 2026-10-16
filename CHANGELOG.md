@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.0](https://github.com/tunix/valhalla/compare/v1.3.4...v1.4.0) (2026-10-16)
+
+
+### Features
+
+* **ui:** Preferences source sidebar with brand logos ([#77](https://github.com/tunix/valhalla/issues/77)) ([bd6338d](https://github.com/tunix/valhalla/commit/bd6338d3769e26e56dbe735543cf0cad244c80c2))
+
 ## [1.3.4](https://github.com/tunix/valhalla/compare/v1.3.3...v1.3.4) (2026-10-16)
 
 
