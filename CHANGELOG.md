@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.4](https://github.com/tunix/valhalla/compare/v1.3.3...v1.3.4) (2026-10-16)
+
+
+### Bug Fixes
+
+* **ci:** appimage sync step needs python3, installed before it runs ([9ac34f5](https://github.com/tunix/valhalla/commit/9ac34f5c35ce8396c089c2f136891b33716e815d))
+
 ## [1.3.3](https://github.com/tunix/valhalla/compare/v1.3.2...v1.3.3) (2026-10-15)
 
 
