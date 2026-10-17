@@ -92,6 +92,10 @@ fn load_css() {
         // Heart toggle: dim by default, destructive red when liked (GNOME HIG).
         // Eased color transition so liking "fades in" instead of popping flat.
         ".preview { border-radius: 16px; }\n\
+         .fav-thumb { border-radius: 12px; }\n\
+         .fav-overlay { opacity: 0; transition: opacity 150ms ease; }\n\
+         .fav-overlay.hovered { opacity: 1; }\n\
+         .favorites-heart { color: @destructive_bg_color; }\n\
          button.heart-button { color: alpha(@window_fg_color, 0.55); transition: color 200ms ease; }\n\
          button.heart-button.liked { color: @destructive_bg_color; }\n\
          @keyframes heart-pop {\n\
