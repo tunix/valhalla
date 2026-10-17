@@ -5,6 +5,12 @@
 //! caches are pruned, favorites must survive. Metadata (source, author,
 //! title, brightness scheme at like-time) travels with the list entry so
 //! the Favorites source can cycle through them without re-fetching.
+//!
+//! Theme matching decodes the *thumbnail* of each candidate on every
+//! refresh, so favorites also keep a small pre-scaled copy under
+//! `favorites/thumbs/` (generated lazily on first use). Without it a
+//! refresh would full-decode every stored wallpaper — seconds of local
+//! work that feels exactly like a network download.
 
 use std::path::{Path, PathBuf};
 
@@ -40,6 +46,73 @@ pub fn favorites_dir() -> PathBuf {
 
 fn list_path() -> PathBuf {
     favorites_dir().join("favorites.json")
+}
+
+/// Small pre-scaled copies used for brightness analysis: `thumbs/<id>.jpg`.
+fn thumbs_dir() -> PathBuf {
+    let dir = favorites_dir().join("thumbs");
+    let _ = std::fs::create_dir_all(&dir);
+    dir
+}
+
+fn thumb_path(id: &str) -> PathBuf {
+    thumbs_dir().join(format!("{}.jpg", sanitize_id(id)))
+}
+
+/// Long edge of the analysis thumbnail. Brightness sampling downscales to
+/// 64×64 anyway (see `brightness::analyze_image`); 256 keeps the stored
+/// thumbnail tiny while leaving room for other uses.
+const THUMB_MAX_EDGE: u32 = 256;
+
+/// Return a path suitable for brightness analysis of the stored copy: the
+/// small thumbnail, generated once when missing, or — when generation
+/// fails (unreadable/corrupt file) — the stored copy itself so the
+/// scheduler can still try to analyze it. With the thumbnail in place the
+/// analysis decodes a few KB per refresh instead of every full-size
+/// wallpaper, which is what keeps a Favorites refresh near-instant.
+fn ensure_thumb(id: &str, stored: &Path) -> PathBuf {
+    let dest = thumb_path(id);
+    if dest.exists() {
+        return dest;
+    }
+    let generated = (|| -> Result<PathBuf, String> {
+        // `thumbnail` upscales, so sources already within the bound keep
+        // being analyzed directly — a header read decides, no full decode.
+        let dims = image::ImageReader::open(stored)
+            .and_then(|r| r.with_guessed_format())
+            .map_err(|e| e.to_string())?
+            .into_dimensions()
+            .map_err(|e| e.to_string())?;
+        if dims.0.max(dims.1) <= THUMB_MAX_EDGE {
+            return Ok(stored.to_path_buf());
+        }
+        let img = image::ImageReader::open(stored)
+            .and_then(|r| r.with_guessed_format())
+            .map_err(|e| e.to_string())?
+            .decode()
+            .map_err(|e| e.to_string())?;
+        let small = img.thumbnail(THUMB_MAX_EDGE, THUMB_MAX_EDGE);
+        // tmp + rename so a concurrent refresh never sees a half-written
+        // thumbnail (same pattern as save_list).
+        let tmp = thumbs_dir().join(format!("{}.tmp", sanitize_id(id)));
+        small
+            .write_to(
+                &mut std::io::BufWriter::new(
+                    std::fs::File::create(&tmp).map_err(|e| e.to_string())?,
+                ),
+                image::ImageFormat::Jpeg,
+            )
+            .map_err(|e| e.to_string())?;
+        std::fs::rename(&tmp, &dest).map_err(|e| e.to_string())?;
+        Ok(dest)
+    })();
+    match generated {
+        Ok(path) => path,
+        Err(e) => {
+            tracing::debug!("thumbnail for favorite {id} not generated: {e}");
+            stored.to_path_buf()
+        }
+    }
 }
 
 /// All favorites, oldest first (insertion order = stable cycle order).
@@ -105,12 +178,27 @@ pub fn remove(id: &str) -> Result<(), String> {
     let fav = favs.remove(pos);
     save_list(&favs)?;
     let _ = std::fs::remove_file(&fav.path); // list entry already gone
+    let _ = std::fs::remove_file(thumb_path(&fav.id)); // analysis thumbnail
+    Ok(())
+}
+
+/// Remove every favorite: stored copies, analysis thumbnails, list. Used
+/// by the "clear all" action in Preferences; the UI's on-disk thumbnail /
+/// preview caches are cleaned up by its `retain_only` on the next rebuild.
+pub fn clear() -> Result<(), String> {
+    let favs = list();
+    save_list(&[])?;
+    for fav in favs {
+        let _ = std::fs::remove_file(&fav.path); // list already emptied
+        let _ = std::fs::remove_file(thumb_path(&fav.id));
+    }
     Ok(())
 }
 
 /// Present favorites as refreshable candidates. Each entry cycles from the
-/// local copy — no network, theme-matching happens on the already-stored
-/// image via brightness analysis in the scheduler.
+/// local copy — no network. Theme matching decodes the candidate's
+/// thumbnail (a small pre-scaled copy, generated once on first use), not
+/// the full-size wallpaper.
 pub fn candidates() -> Result<Vec<crate::source::Candidate>, String> {
     let favs = list();
     if favs.is_empty() {
@@ -118,17 +206,22 @@ pub fn candidates() -> Result<Vec<crate::source::Candidate>, String> {
     }
     Ok(favs
         .into_iter()
-        .map(|f| crate::source::Candidate {
-            id: f.id.clone(),
-            source: "favorites",
-            // The stored copy is the image itself; scheduler's download step
-            // short-circuits when the file already exists in cache.
-            image_url: format!("file://{}", f.path),
-            thumb_url: format!("file://{}", f.path),
-            web_url: String::new(),
-            title: f.title,
-            author: f.author,
-            dominant_colors: Vec::new(),
+        .map(|f| {
+            let stored = PathBuf::from(&f.path);
+            // The stored copy is the image itself. Both URLs use the
+            // file:// scheme on purpose: the scheduler resolves them to
+            // local paths and never routes them through the HTTP client
+            // (see the download + analysis steps in scheduler.rs).
+            crate::source::Candidate {
+                id: f.id.clone(),
+                source: "favorites",
+                image_url: format!("file://{}", f.path),
+                thumb_url: format!("file://{}", ensure_thumb(&f.id, &stored).display()),
+                web_url: String::new(),
+                title: f.title,
+                author: f.author,
+                dominant_colors: Vec::new(),
+            }
         })
         .collect())
 }
@@ -165,6 +258,112 @@ mod tests {
             )
             .unwrap();
         path
+    }
+
+    fn make_image_sized(dir: &Path, name: &str, w: u32, h: u32) -> PathBuf {
+        use image::Rgb;
+        let mut img = image::RgbImage::new(w, h);
+        for (x, y, px) in img.enumerate_pixels_mut() {
+            let v = ((x * 7 + y * 13) % 256) as u8;
+            *px = Rgb([v, v, v]);
+        }
+        let path = dir.join(name);
+        image::DynamicImage::ImageRgb8(img)
+            .write_to(
+                &mut std::io::BufWriter::new(std::fs::File::create(&path).unwrap()),
+                image::ImageFormat::Jpeg,
+            )
+            .unwrap();
+        path
+    }
+
+    /// Favorites get a small pre-scaled analysis thumbnail so the
+    /// scheduler's brightness step never full-decodes every stored
+    /// wallpaper on each refresh. Covers: generation + reuse, small
+    /// sources analyzed directly, corrupt-file fallback and the
+    /// remove() cleanup.
+    #[test]
+    fn analysis_thumbnails_serial() {
+        let _env = crate::http::test_env::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        temp_data("thumbs");
+
+        let tmp = std::env::temp_dir().join(format!("valhalla-fav-thumbs-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let big = make_image_sized(&tmp, "big.jpg", 600, 400);
+        let small = make_image_sized(&tmp, "small.jpg", 100, 60);
+
+        add("big1", "wallhaven", &big, None, None, None).expect("add big");
+        add("small1", "wallhaven", &small, None, None, None).expect("add small");
+
+        let cands = candidates().expect("candidates");
+        let big_c = cands.iter().find(|c| c.id == "big1").unwrap();
+        let small_c = cands.iter().find(|c| c.id == "small1").unwrap();
+
+        // The full-size copy stays the image_url, always — pointing at the
+        // STORED copy, not the file the like copied from.
+        let big_stored = list().iter().find(|f| f.id == "big1").unwrap().path.clone();
+        assert_eq!(big_c.image_url, format!("file://{}", big_stored));
+
+        // Big source: thumbnail generated on the first candidates() call
+        // and used as the analysis source.
+        let thumb = PathBuf::from(big_c.thumb_url.strip_prefix("file://").unwrap());
+        assert!(thumb.exists(), "analysis thumbnail must exist");
+        assert!(thumb.starts_with(thumbs_dir()));
+        let decoded = image::open(&thumb).unwrap();
+        assert!(
+            decoded.width().max(decoded.height()) <= 256,
+            "thumbnail must be small, got {}x{}",
+            decoded.width(),
+            decoded.height()
+        );
+
+        // Small source: no thumbnail needed — analyzed directly from the
+        // stored copy (a thumbnail would only upscale it).
+        let small_stored = list()
+            .iter()
+            .find(|f| f.id == "small1")
+            .unwrap()
+            .path
+            .clone();
+        assert_eq!(small_c.thumb_url, format!("file://{}", small_stored));
+        assert!(!thumb_path("small1").exists());
+
+        // Later candidates() calls reuse the thumbnail (no regeneration).
+        let mtime = std::fs::metadata(&thumb).unwrap().modified().unwrap();
+        candidates().expect("second candidates");
+        assert_eq!(
+            std::fs::metadata(&thumb).unwrap().modified().unwrap(),
+            mtime,
+            "thumbnail must be reused, not regenerated"
+        );
+
+        // Fallback: thumbnail gone + stored copy unreadable -> the stored
+        // path is handed to the scheduler, which will fail to analyze it
+        // and skip the candidate (graceful, like any other source).
+        let favs = list();
+        let stored = favs.iter().find(|f| f.id == "big1").unwrap().path.clone();
+        std::fs::remove_file(&thumb).unwrap();
+        std::fs::write(&stored, b"corrupt").unwrap();
+        let cands = candidates().expect("candidates with corrupt copy");
+        let big_c = cands.iter().find(|c| c.id == "big1").unwrap();
+        assert_eq!(big_c.thumb_url, format!("file://{}", stored));
+
+        // Repair the copy; the thumbnail is regenerated, and remove()
+        // takes it away together with the stored copy.
+        std::fs::copy(&big, &stored).unwrap();
+        candidates().expect("candidates after repair");
+        assert!(thumb_path("big1").exists());
+        remove("big1").expect("remove big1");
+        assert!(!thumb_path("big1").exists(), "thumbnail must be removed");
+        assert!(!PathBuf::from(&stored).exists());
+
+        remove("small1").expect("remove small1");
+        assert!(list().is_empty());
+
+        std::fs::remove_dir_all(&tmp).ok();
+        std::env::remove_var("XDG_DATA_HOME");
     }
 
     #[test]
@@ -244,6 +443,18 @@ mod tests {
         assert!(!name.contains(['/', ':', '*']), "sanitized name: {name}");
         assert!(name.starts_with("photo_with_weird_chars"));
         remove(&favs.last().unwrap().id).ok();
+
+        // clear() wipes everything: list, stored copies, analysis thumbs
+        add("c1", "unsplash", &src, None, None, None).expect("add c1");
+        add("c2", "unsplash", &src, None, None, None).expect("add c2");
+        let c1_path = PathBuf::from(&list()[0].path);
+        clear().expect("clear");
+        assert!(list().is_empty());
+        assert!(!contains("c1") && !contains("c2"));
+        assert!(!c1_path.exists(), "clear removes stored copies");
+        assert!(!thumb_path("c1").exists(), "clear removes analysis thumbs");
+        // clear on an empty list is a no-op
+        clear().expect("clear empty");
 
         std::fs::remove_dir_all(&tmp).ok();
         std::env::remove_var("XDG_DATA_HOME");

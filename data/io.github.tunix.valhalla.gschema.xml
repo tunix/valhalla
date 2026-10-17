@@ -6,6 +6,21 @@
       <summary>Active wallpaper source</summary>
       <description>Identifier of the currently selected wallpaper source.</description>
     </key>
+    <key name="window-width" type="i">
+      <default>720</default>
+      <summary>Saved window width</summary>
+      <description>Last user-chosen window width; restored on the next launch.</description>
+    </key>
+    <key name="window-height" type="i">
+      <default>540</default>
+      <summary>Saved window height</summary>
+      <description>Last user-chosen window height; restored on the next launch.</description>
+    </key>
+    <key name="window-maximized" type="b">
+      <default>false</default>
+      <summary>Window was maximized</summary>
+      <description>Restore the window maximized when it was maximized at exit.</description>
+    </key>
     <key name="refresh-interval" type="u">
       <default>60</default>
       <summary>Automatic refresh interval in minutes</summary>

@@ -41,6 +41,10 @@ pub enum Msg {
     },
     Failed(String),
     Info(String),
+    /// Not a failure, but nothing changed either: the only surviving
+    /// candidate is the wallpaper that is already applied. The GUI shows a
+    /// transient toast and resets the spinner; the daemon logs it.
+    Notice(String),
 }
 
 /// Settings keys that should trigger a refresh when edited.
@@ -233,31 +237,24 @@ impl Core {
         let source = Source::from_id(self.settings.string("active-source").as_str())
             .unwrap_or(Source::Wallhaven);
         let (wh_key, un_key, px_key, pb_key, nasa_key) = {
-            let (tx, rx) = tokio::sync::oneshot::channel();
-            crate::tokio_handle().spawn(async move {
-                let wh = tokio::task::spawn_blocking(|| credentials::get("wallhaven"))
-                    .await
-                    .ok()
-                    .flatten();
-                let un = tokio::task::spawn_blocking(|| credentials::get("unsplash"))
-                    .await
-                    .ok()
-                    .flatten();
-                let px = tokio::task::spawn_blocking(|| credentials::get("pexels"))
-                    .await
-                    .ok()
-                    .flatten();
-                let pb = tokio::task::spawn_blocking(|| credentials::get("pixabay"))
-                    .await
-                    .ok()
-                    .flatten();
-                let ns = tokio::task::spawn_blocking(|| credentials::get("nasa"))
-                    .await
-                    .ok()
-                    .flatten();
-                let _ = tx.send((wh, un, px, pb, ns));
-            });
-            rx.await.unwrap_or_default()
+            // Keyring lookups are independent DBus round-trips: run them
+            // concurrently instead of paying five serial latencies on every
+            // refresh. Plain spawn_blocking (no global handle needed —
+            // refresh always runs inside the tokio runtime).
+            let (wh, un, px, pb, ns) = tokio::join!(
+                tokio::task::spawn_blocking(|| credentials::get("wallhaven")),
+                tokio::task::spawn_blocking(|| credentials::get("unsplash")),
+                tokio::task::spawn_blocking(|| credentials::get("pexels")),
+                tokio::task::spawn_blocking(|| credentials::get("pixabay")),
+                tokio::task::spawn_blocking(|| credentials::get("nasa")),
+            );
+            (
+                wh.ok().flatten(),
+                un.ok().flatten(),
+                px.ok().flatten(),
+                pb.ok().flatten(),
+                ns.ok().flatten(),
+            )
         };
         let screen = config::screen_geometry(&self.settings);
         let wh_cfg = config::wallhaven(&self.settings, wh_key.clone(), screen);
@@ -343,6 +340,34 @@ impl Core {
             return;
         }
 
+        // A refresh must produce a visible change whenever an alternative
+        // exists: the currently applied wallpaper (state history's newest
+        // entry) is excluded from the theme-appropriate pool. When it is the
+        // ONLY survivor — a single favorite, a single manual file, Bing's
+        // single archive image — re-applying it would look like a no-op, so
+        // keep it and say so instead. Theme matching stays law: the
+        // exclusion only ever shrinks an already theme-matched pool.
+        let current_id = locked.get().history.first().map(|e| e.id.clone());
+        if let Some(current) = current_id {
+            let alternatives: Vec<_> = matching
+                .iter()
+                .filter(|c| c.id != current)
+                .cloned()
+                .collect();
+            if alternatives.is_empty() {
+                tracing::info!("only the applied wallpaper is available; keeping it");
+                // Record the refresh so interval/dedup gating does not
+                // re-run this pipeline every tick for the same outcome.
+                locked.get_mut().last_refresh_at = now;
+                locked.save();
+                self.send(Msg::Notice(
+                    "Only one wallpaper is available; nothing was changed.".into(),
+                ));
+                return;
+            }
+            matching = alternatives;
+        }
+
         // Avoid immediate repeats until the pool is exhausted.
         fastrand::shuffle(&mut matching);
         let used: Vec<String> = locked
@@ -381,11 +406,16 @@ impl Core {
             return;
         };
 
-        // Images from sources without a resolution filter (or from the relaxed
-        // retry) may be smaller than the screen: scale them up to cover it.
+        // Images from sources without a resolution filter (or from the
+        // relaxed retry) may be smaller than the screen: scale them up to
+        // cover it. The pre-check reads only the image header — fully
+        // decoding a wallpaper just to learn it already covers the screen
+        // was the dominant cost of a local (Favorites) refresh.
         if let Some(s) = screen {
-            if let Err(e) = crate::fit::upscale_to_cover(&path, s.width, s.height) {
-                tracing::warn!("fit check failed: {e}");
+            if needs_upscale(&path, s.width, s.height) {
+                if let Err(e) = crate::fit::upscale_to_cover(&path, s.width, s.height) {
+                    tracing::warn!("fit check failed: {e}");
+                }
             }
         }
 
@@ -469,6 +499,22 @@ impl Core {
     }
 }
 
+/// Header-only pre-check for `fit::upscale_to_cover`: true when the image
+/// is smaller than the screen in either dimension. An unreadable header
+/// keeps the old always-decode behavior. Reading the dimensions instead of
+/// fully decoding the image first keeps a refresh of large local
+/// wallpapers (Favorites) near-instant.
+fn needs_upscale(path: &Path, screen_w: i32, screen_h: i32) -> bool {
+    let dims = image::ImageReader::open(path)
+        .and_then(|r| r.with_guessed_format())
+        .map_err(|e| e.to_string())
+        .and_then(|r| r.into_dimensions().map_err(|e| e.to_string()));
+    match dims {
+        Ok((w, h)) => (w as i32) < screen_w || (h as i32) < screen_h,
+        Err(_) => true,
+    }
+}
+
 /// Headless mode: refreshes wallpapers without any UI.
 pub fn run_daemon() {
     let settings = config::settings();
@@ -487,6 +533,7 @@ pub fn run_daemon() {
                     tracing::info!("wallpaper set: {} ({})", path.display(), scheme.label());
                 }
                 Msg::Failed(e) => tracing::warn!("{e}"),
+                Msg::Notice(text) => tracing::info!("{text}"),
                 Msg::Busy | Msg::Info(_) => {}
             }
         }
@@ -565,6 +612,7 @@ mod tests {
             },
             Msg::Failed("boom".into()),
             Msg::Info("info".into()),
+            Msg::Notice("notice".into()),
         ];
         for m in &msgs {
             assert!(!format!("{m:?}").is_empty());
@@ -654,5 +702,271 @@ mod tests {
             .collect();
         history.truncate(50);
         assert_eq!(history.len(), 50);
+    }
+
+    /// file:// candidates (Favorites, Manual) must resolve to local reads:
+    /// the analysis step reads the file directly and never touches the
+    /// HTTP client, and a missing file degrades to a skippable error.
+    #[test]
+    fn analyze_reads_file_candidates_locally() {
+        let _env = crate::http::test_env::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("GSETTINGS_BACKEND", "memory");
+        let (tx, rx) = async_channel::unbounded();
+        let core = Core::new(gio::Settings::new("io.github.tunix.valhalla"), tx);
+
+        let dir = std::env::temp_dir().join(format!("valhalla-sched-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let img = dir.join("dark.jpg");
+        let mut px = image::RgbImage::new(32, 32);
+        for p in px.pixels_mut() {
+            *p = image::Rgb([10, 10, 14]);
+        }
+        image::DynamicImage::ImageRgb8(px)
+            .write_to(
+                &mut std::io::BufWriter::new(std::fs::File::create(&img).unwrap()),
+                image::ImageFormat::Jpeg,
+            )
+            .unwrap();
+
+        let candidate = |thumb: String| crate::source::Candidate {
+            id: "f1".into(),
+            source: "favorites",
+            image_url: thumb.clone(),
+            thumb_url: thumb,
+            web_url: String::new(),
+            title: None,
+            author: None,
+            dominant_colors: Vec::new(),
+        };
+
+        // analyze() is async by signature only (no awaits inside); drive it
+        // on a small runtime like applier's portal guard test does, so the
+        // env lock is never held across an await.
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+
+        let scheme = rt
+            .block_on(core.analyze(&candidate(format!("file://{}", img.display())), 0.45))
+            .expect("local analysis");
+        assert_eq!(scheme, ColorScheme::Dark);
+
+        // Missing file: graceful error the caller skips the candidate for.
+        assert!(rt
+            .block_on(core.analyze(
+                &candidate("file:///nonexistent/valhalla-missing.jpg".into()),
+                0.45
+            ))
+            .is_err());
+
+        // Local analysis must not emit any scheduler messages and must not
+        // leave anything in the HTTP cache dirs.
+        assert!(rx.try_recv().is_err(), "no messages expected");
+        std::fs::remove_dir_all(&dir).ok();
+        std::env::remove_var("GSETTINGS_BACKEND");
+    }
+
+    /// Build a small solid-color JPEG for the favorites pipeline tests.
+    fn solid_jpeg(dir: &std::path::Path, name: &str, color: [u8; 3]) -> std::path::PathBuf {
+        let mut px = image::RgbImage::new(32, 32);
+        for p in px.pixels_mut() {
+            *p = image::Rgb(color);
+        }
+        let path = dir.join(name);
+        image::DynamicImage::ImageRgb8(px)
+            .write_to(
+                &mut std::io::BufWriter::new(std::fs::File::create(&path).unwrap()),
+                image::ImageFormat::Jpeg,
+            )
+            .unwrap();
+        path
+    }
+
+    /// Full-pipeline environment for refresh() against the Favorites source:
+    /// temp XDG_DATA_HOME (favorites list), temp XDG_STATE_HOME (state
+    /// store) and the memory GSettings backend — all process-global, so the
+    /// caller must hold ENV_LOCK for the whole test. Every knob the refresh
+    /// pipeline reads is pinned explicitly; the memory backend is shared
+    /// between tests, so nothing may rely on defaults.
+    fn favorites_core(tag: &str) -> (Core, async_channel::Receiver<Msg>, std::path::PathBuf) {
+        std::env::set_var("GSETTINGS_BACKEND", "memory");
+        let tmp = std::env::temp_dir().join(format!("valhalla-sched-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        std::env::set_var("XDG_DATA_HOME", tmp.join("data"));
+        std::env::set_var("XDG_STATE_HOME", tmp.join("state"));
+
+        let (tx, rx) = async_channel::unbounded();
+        let core = Core::new(gio::Settings::new("io.github.tunix.valhalla"), tx);
+        let s = gio::Settings::new("io.github.tunix.valhalla");
+        let _ = s.set_string("active-source", "favorites");
+        // Tiny screen: the fit check exercises without big decodes.
+        let _ = s.set_string("screen-geometry", "128x128");
+        let _ = s.set_boolean("match-theme", true);
+        let _ = s.set_string("match-strictness", "require");
+        let _ = s.set_double("brightness-threshold", 0.45);
+        (core, rx, tmp)
+    }
+
+    fn favorites_teardown(core: &Core, tmp: &std::path::Path) {
+        // Restore the shared memory-backend keys before dropping the backend.
+        let _ = core.settings.0.set_string("active-source", "wallhaven");
+        std::env::remove_var("XDG_DATA_HOME");
+        std::env::remove_var("XDG_STATE_HOME");
+        std::env::remove_var("GSETTINGS_BACKEND");
+        std::fs::remove_dir_all(tmp).ok();
+    }
+
+    /// Mark `id` as the currently applied wallpaper (state history's newest
+    /// entry — what the exclusion logic reads).
+    fn seed_current(core: &Core, id: &str, path: &std::path::Path) {
+        let mut locked = core.store.try_lock().unwrap();
+        locked.get_mut().history.insert(
+            0,
+            HistoryEntry {
+                id: id.into(),
+                source: "favorites".into(),
+                path: path.to_string_lossy().into_owned(),
+                title: None,
+                author: None,
+            },
+        );
+        locked.save();
+    }
+
+    fn drain(rx: &async_channel::Receiver<Msg>) -> Vec<Msg> {
+        let mut msgs = Vec::new();
+        while let Ok(m) = rx.try_recv() {
+            msgs.push(m);
+        }
+        msgs
+    }
+
+    /// Drive one full refresh() on a current-thread runtime. refresh() is
+    /// awaited inside block_on, so ENV_LOCK is never held across an await.
+    fn run_refresh(core: &Core, now: u64, scheme: ColorScheme) {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        let mut locked = core.store.try_lock().unwrap();
+        rt.block_on(core.refresh(&mut locked, now, scheme));
+    }
+
+    /// (a) The currently applied wallpaper is excluded from selection
+    /// whenever another candidate survives theme matching: a refresh must
+    /// change something visible, not silently re-apply the same file.
+    #[test]
+    fn refresh_excludes_applied_wallpaper_when_alternatives_exist() {
+        let _env = crate::http::test_env::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let (core, rx, tmp) = favorites_core("excl");
+        let dark = solid_jpeg(&tmp, "dark.jpg", [10, 10, 14]);
+        crate::favorites::add("fA", "wallhaven", &dark, None, None, None).unwrap();
+        crate::favorites::add("fB", "wallhaven", &dark, None, None, None).unwrap();
+        seed_current(&core, "fA", &dark);
+
+        run_refresh(&core, 1_000, ColorScheme::Dark);
+
+        let msgs = drain(&rx);
+        assert_eq!(msgs.len(), 1, "exactly one WallpaperSet expected: {msgs:?}");
+        match &msgs[0] {
+            Msg::WallpaperSet {
+                id, source, scheme, ..
+            } => {
+                assert_eq!(id, "fB", "the applied wallpaper must be excluded");
+                assert_eq!(*source, "favorites");
+                assert_eq!(*scheme, ColorScheme::Dark);
+            }
+            other => panic!("expected WallpaperSet, got {other:?}"),
+        }
+        assert_eq!(core.store.read().history[0].id, "fB");
+        favorites_teardown(&core, &tmp);
+    }
+
+    /// (b) When the only theme-matching candidate IS the applied wallpaper
+    /// (a single favorite here), the refresh must not re-apply it: a Notice
+    /// is emitted, the history is untouched, and the refresh counts as done
+    /// for interval gating.
+    #[test]
+    fn refresh_single_survivor_notices_without_reapplying() {
+        let _env = crate::http::test_env::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let (core, rx, tmp) = favorites_core("single");
+        let dark = solid_jpeg(&tmp, "dark.jpg", [10, 10, 14]);
+        crate::favorites::add("fA", "wallhaven", &dark, None, None, None).unwrap();
+        seed_current(&core, "fA", &dark);
+
+        run_refresh(&core, 2_000, ColorScheme::Dark);
+
+        let msgs = drain(&rx);
+        assert_eq!(msgs.len(), 1, "only a Notice expected: {msgs:?}");
+        match &msgs[0] {
+            Msg::Notice(text) => assert!(
+                text.contains("Only one wallpaper"),
+                "notice must say nothing changed: {text}"
+            ),
+            other => panic!("expected Notice, got {other:?}"),
+        }
+        let state = core.store.read();
+        assert_eq!(state.history[0].id, "fA", "wallpaper unchanged");
+        assert_eq!(state.last_refresh_at, 2_000, "refresh recorded");
+        favorites_teardown(&core, &tmp);
+    }
+
+    /// (c) No applied wallpaper yet (empty history): the single candidate is
+    /// applied normally — the exclusion only guards repeats.
+    #[test]
+    fn refresh_without_current_applies_single_candidate() {
+        let _env = crate::http::test_env::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let (core, rx, tmp) = favorites_core("first");
+        let dark = solid_jpeg(&tmp, "dark.jpg", [10, 10, 14]);
+        crate::favorites::add("fA", "wallhaven", &dark, None, None, None).unwrap();
+
+        run_refresh(&core, 3_000, ColorScheme::Dark);
+
+        let msgs = drain(&rx);
+        assert_eq!(msgs.len(), 1, "exactly one WallpaperSet expected: {msgs:?}");
+        match &msgs[0] {
+            Msg::WallpaperSet { id, .. } => assert_eq!(id, "fA"),
+            other => panic!("expected WallpaperSet, got {other:?}"),
+        }
+        assert_eq!(core.store.read().history[0].id, "fA");
+        favorites_teardown(&core, &tmp);
+    }
+
+    /// (d) Theme matching stays law: a light favorite is NOT used to dodge
+    /// the exclusion in dark mode. If excluding the current id would empty
+    /// the theme-matched pool, the no-change + notice path wins.
+    #[test]
+    fn refresh_exclusion_never_violates_theme_matching() {
+        let _env = crate::http::test_env::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let (core, rx, tmp) = favorites_core("themelaw");
+        let dark = solid_jpeg(&tmp, "dark.jpg", [10, 10, 14]);
+        let light = solid_jpeg(&tmp, "light.jpg", [240, 240, 240]);
+        crate::favorites::add("fA", "wallhaven", &dark, None, None, None).unwrap();
+        crate::favorites::add("fB", "wallhaven", &light, None, None, None).unwrap();
+        seed_current(&core, "fA", &dark);
+
+        run_refresh(&core, 4_000, ColorScheme::Dark);
+
+        let msgs = drain(&rx);
+        assert_eq!(msgs.len(), 1, "only a Notice expected: {msgs:?}");
+        match &msgs[0] {
+            Msg::Notice(text) => assert!(
+                text.contains("Only one wallpaper"),
+                "theme pool had only the applied one: {text}"
+            ),
+            other => panic!("expected Notice, got {other:?}"),
+        }
+        assert_eq!(core.store.read().history[0].id, "fA", "wallpaper unchanged");
+        favorites_teardown(&core, &tmp);
     }
 }

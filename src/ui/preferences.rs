@@ -1,7 +1,9 @@
-use adw::prelude::*;
-use gtk::{gio, glib};
+use std::rc::Rc;
 
-use crate::credentials;
+use adw::prelude::*;
+use gtk::{gdk, gio, glib};
+
+use crate::{credentials, favorites::Favorite};
 
 const INTERVAL_MINUTES: [u32; 5] = [0, 15, 60, 360, 1440];
 const INTERVAL_LABELS: [&str; 5] = [
@@ -36,12 +38,18 @@ const CONTENT_FILTER_VALUES: [&str; 2] = ["low", "high"];
 const CONTENT_FILTER_LABELS: [&str; 2] = ["Low (moderate)", "High (strict)"];
 
 /// Sidebar entries: (stack name, label, icon). Order = sidebar order.
-const SIDEBAR: [(&str, &str, &str, &str); 8] = [
+const SIDEBAR: [(&str, &str, &str, &str); 9] = [
     (
         "general",
         "General",
         "source-general",
         "Refresh schedule and behavior",
+    ),
+    (
+        "favorites",
+        "Favorites",
+        "valhalla-heart-symbolic",
+        "Wallpapers you liked with the heart button",
     ),
     (
         "wallhaven",
@@ -111,6 +119,7 @@ pub fn build(settings: &gio::Settings) -> adw::Dialog {
     };
 
     pages.add(&general_page(settings));
+    pages.add(&favorites_page());
 
     let (wh_page, wh_key_row, nsfw_row, _purity_rows) = wallhaven_page(settings);
     pages.add(&wh_page);
@@ -193,6 +202,11 @@ pub fn build(settings: &gio::Settings) -> adw::Dialog {
 fn sidebar_row(label: &str, icon: &str) -> gtk::ListBoxRow {
     let image = gtk::Image::from_icon_name(icon);
     image.set_pixel_size(24);
+    // The Favorites heart reads better in the destructive red the heart
+    // button uses when liked, than in the plain foreground color.
+    if icon == crate::app::heart_icon_name() {
+        image.add_css_class("favorites-heart");
+    }
     let text = gtk::Label::builder()
         .label(label)
         .xalign(0.0)
@@ -444,6 +458,323 @@ fn general_page(settings: &gio::Settings) -> adw::PreferencesPage {
     behavior_group.add(&login);
 
     page
+}
+
+/// Size of one grid tile (16:9-ish).
+const TILE_WIDTH: i32 = 168;
+const TILE_HEIGHT: i32 = 94;
+
+/// Favorites: every wallpaper liked with the heart button, shown as a
+/// grid of thumbnails. Hovering a tile reveals preview and remove actions.
+fn favorites_page() -> adw::PreferencesPage {
+    let page = adw::PreferencesPage::new();
+    page.set_title("Favorites");
+
+    let group = adw::PreferencesGroup::new();
+    group.set_title("Liked wallpapers");
+    group.set_description(Some(
+        "Wallpapers you liked with the heart button are stored locally and cycle offline.",
+    ));
+    page.add(&group);
+
+    let empty = gtk::Label::builder()
+        .label("No favorites yet — like a wallpaper with the heart button")
+        .wrap(true)
+        .xalign(0.0)
+        .css_classes(["dimmed"])
+        .build();
+    group.add(&empty);
+
+    let flow = gtk::FlowBox::builder()
+        .selection_mode(gtk::SelectionMode::None)
+        .min_children_per_line(2)
+        .max_children_per_line(3)
+        .column_spacing(12)
+        .row_spacing(12)
+        .build();
+    group.add(&flow);
+
+    let clear_btn = gtk::Button::builder()
+        .label("Clear All")
+        .css_classes(["destructive-action"])
+        // Centered under the grid with breathing room, per GNOME HIG
+        // spacing: it is a page-level action, not tied to the last tile.
+        .halign(gtk::Align::Center)
+        .margin_top(12)
+        .sensitive(false) // enabled by the rebuild below when there is anything to clear
+        .build();
+    group.add(&clear_btn);
+
+    // The dialog is rebuilt on every open, so a single fill here is always
+    // fresh; afterwards the grid only rebuilds itself on removals.
+    rebuild_favorites_flow(&flow, &empty, &clear_btn);
+
+    // Destructive: confirm before wiping every favorite.
+    {
+        let flow_weak = flow.downgrade();
+        let empty_weak = empty.downgrade();
+        let btn_weak = clear_btn.downgrade();
+        clear_btn.connect_clicked(move |btn| {
+            let Some(parent) = btn.root().map(|r| r.upcast_ref::<gtk::Widget>().clone()) else {
+                return;
+            };
+            let dialog = adw::AlertDialog::builder()
+                .heading("Clear all favorites?")
+                .body("Every liked wallpaper will be removed. This cannot be undone.")
+                .build();
+            dialog.add_response("cancel", "Cancel");
+            dialog.add_response("clear", "Clear All");
+            dialog.set_response_appearance("clear", adw::ResponseAppearance::Destructive);
+            dialog.set_default_response(Some("cancel"));
+            dialog.set_close_response("cancel");
+            let flow_weak = flow_weak.clone();
+            let empty_weak = empty_weak.clone();
+            let btn_weak = btn_weak.clone();
+            dialog.connect_response(Some("clear"), move |_, _| {
+                let (done_tx, done_rx) = async_channel::unbounded::<Result<(), String>>();
+                crate::tokio_handle().spawn_blocking(move || {
+                    let _ = done_tx.send_blocking(crate::favorites::clear());
+                });
+                let flow_weak = flow_weak.clone();
+                let empty_weak = empty_weak.clone();
+                let btn_weak = btn_weak.clone();
+                glib::spawn_future_local(async move {
+                    if let Ok(Err(e)) = done_rx.recv().await {
+                        tracing::warn!("failed to clear favorites: {e}");
+                    }
+                    if let (Some(flow), Some(empty), Some(clear_btn)) = (
+                        flow_weak.upgrade(),
+                        empty_weak.upgrade(),
+                        btn_weak.upgrade(),
+                    ) {
+                        rebuild_favorites_flow(&flow, &empty, &clear_btn);
+                    }
+                });
+            });
+            dialog.present(Some(&parent));
+        });
+    }
+
+    page
+}
+
+/// Refill the grid from the persisted favorites list.
+fn rebuild_favorites_flow(flow: &gtk::FlowBox, empty: &gtk::Label, clear_btn: &gtk::Button) {
+    while let Some(child) = flow.first_child() {
+        flow.remove(&child);
+    }
+    let favs = crate::favorites::list();
+    let has_favs = !favs.is_empty();
+    flow.set_visible(has_favs);
+    empty.set_visible(!has_favs);
+    clear_btn.set_sensitive(has_favs);
+    // Drop cache entries whose favorite is gone (e.g. removed just now),
+    // so the stored files' memory is reclaimed promptly.
+    let paths: Vec<String> = favs.iter().map(|f| f.path.clone()).collect();
+    crate::ui::thumbnails::retain_only(&paths);
+    // Fill in any missing on-disk previews in the background, so preview
+    // clicks always find their screen-sized file ready.
+    crate::ui::thumbnails::prewarm_previews(paths);
+    for fav in favs {
+        let flow_weak = flow.downgrade();
+        let empty_weak = empty.downgrade();
+        let btn_weak = clear_btn.downgrade();
+        let rebuild = Rc::new(move || {
+            if let (Some(flow), Some(empty), Some(clear_btn)) = (
+                flow_weak.upgrade(),
+                empty_weak.upgrade(),
+                btn_weak.upgrade(),
+            ) {
+                rebuild_favorites_flow(&flow, &empty, &clear_btn);
+            }
+        }) as Rc<dyn Fn()>;
+        flow.append(&fav_tile(fav, rebuild));
+    }
+}
+
+/// One grid tile: local thumbnail, hover actions to preview and un-like.
+fn fav_tile(fav: Favorite, rebuild: Rc<dyn Fn()>) -> gtk::FlowBoxChild {
+    let child = gtk::FlowBoxChild::new();
+
+    let tile = gtk::Overlay::builder()
+        .width_request(TILE_WIDTH)
+        .height_request(TILE_HEIGHT)
+        .tooltip_text(tile_tooltip(&fav))
+        .build();
+
+    let picture = gtk::Picture::builder()
+        .content_fit(gtk::ContentFit::Cover)
+        .can_shrink(true)
+        .css_classes(["fav-thumb"])
+        .build();
+    tile.set_child(Some(&picture));
+
+    // Cache hit paints instantly; a miss decodes + downscales off the main
+    // thread and stores the texture for the next rebuild/open.
+    crate::ui::thumbnails::load_thumb(&fav.path, &picture);
+
+    // Hover actions: reveal only while the pointer is over the tile; the
+    // hidden bar must not grab clicks either.
+    let bar = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(6)
+        .halign(gtk::Align::End)
+        .valign(gtk::Align::End)
+        .margin_end(6)
+        .margin_bottom(6)
+        .css_classes(["fav-overlay"])
+        .can_target(false)
+        .build();
+    tile.add_overlay(&bar);
+
+    let preview_btn = gtk::Button::from_icon_name("view-fullscreen-symbolic");
+    preview_btn.add_css_class("osd");
+    preview_btn.set_tooltip_text(Some("Preview"));
+    let fav_preview = fav.clone();
+    preview_btn.connect_clicked(move |_| {
+        show_preview_window(&fav_preview);
+    });
+    bar.append(&preview_btn);
+
+    let remove_btn = gtk::Button::from_icon_name("user-trash-symbolic");
+    remove_btn.add_css_class("osd");
+    remove_btn.set_tooltip_text(Some("Remove from Favorites"));
+    let fav_id = fav.id.clone();
+    remove_btn.connect_clicked(move |_| {
+        let (done_tx, done_rx) = async_channel::unbounded::<Result<(), String>>();
+        let id = fav_id.clone();
+        crate::tokio_handle().spawn_blocking(move || {
+            let _ = done_tx.send_blocking(crate::favorites::remove(&id));
+        });
+        let rebuild = rebuild.clone();
+        glib::spawn_future_local(async move {
+            if let Ok(Err(e)) = done_rx.recv().await {
+                tracing::warn!("failed to remove favorite: {e}");
+            }
+            rebuild();
+        });
+    });
+    bar.append(&remove_btn);
+
+    let motion = gtk::EventControllerMotion::new();
+    let bar_enter = bar.clone();
+    let bar_leave = bar.clone();
+    motion.connect_enter(move |_, _, _| {
+        bar_enter.set_can_target(true);
+        bar_enter.add_css_class("hovered");
+    });
+    motion.connect_leave(move |_| {
+        bar_leave.set_can_target(false);
+        bar_leave.remove_css_class("hovered");
+    });
+    tile.add_controller(motion);
+
+    child.set_child(Some(&tile));
+    child
+}
+
+/// Large preview of a favorite, in its own top-level window — unlike a
+/// dialog it is not bounded by the app window, so the image gets the
+/// monitor's size. The window is presented immediately with a spinner;
+/// the (screen-sized) decode happens off-thread and swaps in when ready.
+fn show_preview_window(fav: &Favorite) {
+    let (width, height) = preview_window_size();
+    let window = gtk::Window::builder()
+        .title(preview_title(fav))
+        .modal(true)
+        .build();
+    window.set_default_size(width, height);
+
+    // Transient for the main application window so window managers keep
+    // the preview grouped with (and above) it.
+    let parent = gtk::Window::list_toplevels()
+        .into_iter()
+        .find_map(|w| w.downcast::<adw::ApplicationWindow>().ok());
+    if let Some(parent) = parent {
+        window.set_transient_for(Some(&parent));
+    }
+
+    let picture = gtk::Picture::builder()
+        .content_fit(gtk::ContentFit::Contain)
+        .can_shrink(true)
+        .hexpand(true)
+        .vexpand(true)
+        .build();
+
+    // Shown immediately and stopped/hidden again in `on_done`, whichever
+    // way the decode goes — never strand the spinner.
+    let spinner = gtk::Spinner::builder()
+        .spinning(true)
+        .halign(gtk::Align::Center)
+        .valign(gtk::Align::Center)
+        .build();
+
+    let overlay = gtk::Overlay::new();
+    overlay.set_child(Some(&picture));
+    overlay.add_overlay(&spinner);
+
+    window.set_child(Some(&overlay));
+
+    // Escape closes the preview like a dialog does: "window.close" is
+    // GTK's built-in close action available on every window.
+    let shortcuts = gtk::ShortcutController::new();
+    shortcuts.set_scope(gtk::ShortcutScope::Local);
+    shortcuts.add_shortcut(gtk::Shortcut::new(
+        gtk::ShortcutTrigger::parse_string("Escape"),
+        Some(gtk::NamedAction::new("window.close")),
+    ));
+    window.add_controller(shortcuts);
+
+    // Present before decoding: the preview must open instantly.
+    window.present();
+
+    let spinner_weak = spinner.downgrade();
+    crate::ui::thumbnails::load_preview(&fav.path, &picture, move |ok| {
+        if !ok {
+            tracing::warn!("favorite preview failed");
+        }
+        if let Some(spinner) = spinner_weak.upgrade() {
+            spinner.set_spinning(false);
+            spinner.set_visible(false);
+        }
+    });
+}
+
+/// Default preview window size: 90% of the primary monitor's geometry
+/// (logical pixels), with a fallback for headless/early startup.
+fn preview_window_size() -> (i32, i32) {
+    const FALLBACK: (i32, i32) = (1200, 800);
+    let Some(display) = gdk::Display::default() else {
+        return FALLBACK;
+    };
+    let Some(monitor) = display.monitors().item(0).and_downcast::<gdk::Monitor>() else {
+        return FALLBACK;
+    };
+    let geometry = monitor.geometry();
+    (
+        geometry.width().max(1) * 9 / 10,
+        geometry.height().max(1) * 9 / 10,
+    )
+}
+
+fn tile_tooltip(fav: &Favorite) -> String {
+    let mut parts = Vec::new();
+    if let Some(title) = fav.title.as_deref().filter(|t| !t.is_empty()) {
+        parts.push(title.to_string());
+    }
+    if let Some(author) = fav.author.as_deref().filter(|a| !a.is_empty()) {
+        parts.push(format!("by {author}"));
+    }
+    parts.push(fav.source.clone());
+    parts.join(" · ")
+}
+
+fn preview_title(fav: &Favorite) -> String {
+    fav.title
+        .as_deref()
+        .filter(|t| !t.is_empty())
+        .unwrap_or("Favorite wallpaper")
+        .to_string()
 }
 
 fn wallhaven_page(

@@ -100,6 +100,7 @@ impl Window {
         let _ = imp.settings.set(settings.clone());
         let _ = imp.trig.set(trig);
 
+        window.setup_geometry_persistence();
         window.setup_dropdown();
         window.setup_actions();
         window.setup_close();
@@ -201,7 +202,8 @@ impl Window {
             let Some(current) = imp.current_wallpaper.borrow().clone() else {
                 return; // nothing to like yet
             };
-            let result = if crate::favorites::contains(&current.id) {
+            let was_liked = crate::favorites::contains(&current.id);
+            let result = if was_liked {
                 crate::favorites::remove(&current.id)
             } else {
                 crate::favorites::add(
@@ -213,10 +215,21 @@ impl Window {
                     Some(current.scheme),
                 )
             };
-            if let Err(e) = result {
-                imp.toast_overlay.add_toast(adw::Toast::new(&e));
+            if let Err(e) = &result {
+                imp.toast_overlay.add_toast(adw::Toast::new(e));
             }
             window.update_heart();
+            // A fresh like pre-warms the thumbnail and preview caches so
+            // the Favorites page and the preview window are instant later.
+            if !was_liked && result.is_ok() {
+                if let Some(fav) = crate::favorites::list()
+                    .into_iter()
+                    .find(|f| f.id == current.id)
+                {
+                    crate::ui::thumbnails::prewarm(&fav.path);
+                    crate::ui::thumbnails::prewarm_preview(&fav.path);
+                }
+            }
         });
         self.add_action(&toggle_favorite);
 
@@ -282,6 +295,23 @@ impl Window {
                 glib::Propagation::Proceed
             }
         });
+    }
+
+    /// Persist the window geometry with GTK's own mechanism: GTK 4 tracks
+    /// interactive resizes in `default-width`/`default-height`
+    /// (surface_size_changed → set_default_size_internal) and the window
+    /// state in `maximized`, so plain GSettings binds both restore at
+    /// construction and save continuously. A hard kill (Ctrl+C on
+    /// `cargo run`) keeps the last size, unlike close-time saves which
+    /// never run in that case. GTK itself skips remembering while the
+    /// window is maximized/tiled/fullscreened.
+    fn setup_geometry_persistence(&self) {
+        let settings = self.imp().settings.get().unwrap();
+        settings.bind("window-width", self, "default-width").build();
+        settings
+            .bind("window-height", self, "default-height")
+            .build();
+        settings.bind("window-maximized", self, "maximized").build();
     }
 
     fn watch_settings(&self) {
@@ -394,6 +424,13 @@ impl Window {
                 self.restore_preview();
             }
             Msg::Info(text) => imp.info_label.set_text(&text),
+            Msg::Notice(text) => {
+                // Nothing changed: leave the spinner immediately and surface
+                // the "why" as a transient toast instead.
+                imp.refresh_stack.set_visible_child_name("button");
+                imp.info_label.set_text(&text);
+                imp.toast_overlay.add_toast(adw::Toast::new(&text));
+            }
         }
     }
 }
