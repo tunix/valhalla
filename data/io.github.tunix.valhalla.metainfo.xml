@@ -32,6 +32,13 @@
   </screenshots>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="1.5.0" date="2026-10-20">
+      <description>
+        <ul>
+          <li>**ui:** favorites management, instant refresh and window geometry persistence ([#79](https://github.com/tunix/valhalla/issues/79)) ([caf9eb9](https://github.com/tunix/valhalla/commit/caf9eb91585fed6cb125dad09f7d708622ca1474))</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.4.0" date="2026-10-16">
       <description>
         <ul>
@@ -96,18 +103,6 @@
           <li>**ci:** release pipeline after systemd removal + AppImage VERSION scope ([#45](https://github.com/tunix/valhalla/issues/45)) ([fa0c8e5](https://github.com/tunix/valhalla/commit/fa0c8e52784c359a6b155cadb39ecb26bc75cb1c))</li>
           <li>**ci:** step-level TAG env on release uploads (dispatch path) ([#47](https://github.com/tunix/valhalla/issues/47)) ([b6ddf61](https://github.com/tunix/valhalla/commit/b6ddf6123cf157a6b42b129bc6c1188dd658afae))</li>
           <li>**ci:** tag_name as direct expression in release upload steps ([#48](https://github.com/tunix/valhalla/issues/48)) ([7ce847d](https://github.com/tunix/valhalla/commit/7ce847da1cf739e2dd3bd4534b3b141782cab18a))</li>
-        </ul>
-      </description>
-    </release>
-    <release version="1.0.0" date="2026-10-10">
-      <description>
-        <ul>
-          <li>drop systemd user service; portal-first everywhere ([#40](https://github.com/tunix/valhalla/issues/40))</li>
-          <li>**ui:** opt-in Start at login via XDG autostart ([#42](https://github.com/tunix/valhalla/issues/42)) ([3b15358](https://github.com/tunix/valhalla/commit/3b1535887d359e9b3102a6df2ac2de69871fbadf))</li>
-          <li>**autostart:** Exec=valhalla --daemon via PATH, not current_exe ([#43](https://github.com/tunix/valhalla/issues/43)) ([5263adc](https://github.com/tunix/valhalla/commit/5263adcacd70a704f600ffa914b07f6de50f44f1))</li>
-          <li>**autostart:** resolve Exec per packaging mode (AppImage via $APPIMAGE) ([#44](https://github.com/tunix/valhalla/issues/44)) ([4fa1f6e](https://github.com/tunix/valhalla/commit/4fa1f6e02afad99fc7a33c870fed77f576c548f9))</li>
-          <li>startup defaults on; systemd login-toggle fixes ([#38](https://github.com/tunix/valhalla/issues/38)) ([9e42fcb](https://github.com/tunix/valhalla/commit/9e42fcbb97cc5442d47fbfcde7035484de778d76))</li>
-          <li>drop systemd user service; portal-first everywhere ([#40](https://github.com/tunix/valhalla/issues/40)) ([68a0251](https://github.com/tunix/valhalla/commit/68a0251399c8aac4701d41b073092f8fb288afab))</li>
         </ul>
       </description>
     </release>
