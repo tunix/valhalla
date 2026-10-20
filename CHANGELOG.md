@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.0](https://github.com/tunix/valhalla/compare/v1.4.0...v1.5.0) (2026-10-20)
+
+
+### Features
+
+* **ui:** favorites management, instant refresh and window geometry persistence ([#79](https://github.com/tunix/valhalla/issues/79)) ([caf9eb9](https://github.com/tunix/valhalla/commit/caf9eb91585fed6cb125dad09f7d708622ca1474))
+
 ## [1.4.0](https://github.com/tunix/valhalla/compare/v1.3.4...v1.4.0) (2026-10-16)
 
 
