@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.1](https://github.com/tunix/valhalla/compare/v1.5.0...v1.5.1) (2026-10-20)
+
+
+### Bug Fixes
+
+* **ui:** mask API key rows as secrets with peek toggle ([#84](https://github.com/tunix/valhalla/issues/84)) ([ebc206f](https://github.com/tunix/valhalla/commit/ebc206f802683b48153b0958a8c8cb969b9bd530))
+
 ## [1.5.0](https://github.com/tunix/valhalla/compare/v1.4.0...v1.5.0) (2026-10-20)
 
 
