@@ -56,9 +56,30 @@ sudo dnf install -y rust cargo rustfmt clippy gcc pkgconf-pkg-config \
 
 ## Flatpak
 
-Every release ships ready-to-install `.flatpak` bundles (x86_64 and
-aarch64), built in CI from [`flatpak/io.github.tunix.valhalla.json`](flatpak/io.github.tunix.valhalla.json)
-on the GNOME 49 runtime. Grab one from the
+The app is distributed through a self-hosted Flatpak repository: every
+release is built automatically in CI from
+[`flatpak/io.github.tunix.valhalla.json`](flatpak/io.github.tunix.valhalla.json)
+on the GNOME 49 runtime and published (GPG-signed) to the `tunix` remote.
+
+**Install (recommended):** add the remote once, then install like any
+Flathub app. Future updates arrive via `flatpak update`.
+
+```sh
+flatpak remote-add --if-not-exists tunix \
+    https://alperkan.at/flatpak/tunix.flatpakrepo
+flatpak install tunix io.github.tunix.valhalla
+```
+
+Or the single-command version, which adds the remote and installs in
+one step via the signed ref file:
+
+```sh
+flatpak install \
+    https://alperkan.at/flatpak/io.github.tunix.valhalla.flatpakref
+```
+
+**Offline / airgapped:** every release also ships ready-to-install
+`.flatpak` bundles (x86_64 and aarch64). Grab one from the
 [releases page](https://github.com/tunix/valhalla/releases) and install:
 
 ```sh
@@ -66,7 +87,9 @@ flatpak install ./valhalla-<tag>-x86_64.flatpak
 ```
 
 The bundle references its runtime, so the GNOME 49 platform is pulled
-from Flathub automatically on first install.
+from Flathub automatically on first install. Note that bundles are
+frozen at their tag: they do not receive updates through
+`flatpak update` — switch to the remote install above for updates.
 
 To build the bundle locally instead:
 
