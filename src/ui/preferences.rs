@@ -134,7 +134,7 @@ pub fn build(settings: &gio::Settings) -> adw::Dialog {
     pages.add(&pb_page);
 
     pages.add(&bing_page());
-    let nasa_key_row = adw::EntryRow::new();
+    let nasa_key_row = adw::PasswordEntryRow::new();
     nasa_key_row.set_title("API key (optional)");
     nasa_key_row.set_show_apply_button(true);
     let nasa_row_weak = nasa_key_row.downgrade();
@@ -781,7 +781,7 @@ fn wallhaven_page(
     settings: &gio::Settings,
 ) -> (
     adw::PreferencesPage,
-    adw::EntryRow,
+    adw::PasswordEntryRow,
     adw::SwitchRow,
     Vec<adw::SwitchRow>,
 ) {
@@ -792,7 +792,7 @@ fn wallhaven_page(
     api_group.set_title("API");
     page.add(&api_group);
 
-    let api_key = adw::EntryRow::new();
+    let api_key = adw::PasswordEntryRow::new();
     api_key.set_title("API key");
     api_key.set_show_apply_button(true);
     api_group.add(&api_key);
@@ -860,7 +860,7 @@ fn wallhaven_page(
     (page, api_key, nsfw, purity)
 }
 
-fn pexels_page(settings: &gio::Settings) -> (adw::PreferencesPage, adw::EntryRow) {
+fn pexels_page(settings: &gio::Settings) -> (adw::PreferencesPage, adw::PasswordEntryRow) {
     let page = adw::PreferencesPage::new();
     page.set_title("Pexels");
 
@@ -868,7 +868,7 @@ fn pexels_page(settings: &gio::Settings) -> (adw::PreferencesPage, adw::EntryRow
     api_group.set_title("API");
     page.add(&api_group);
 
-    let api_key = adw::EntryRow::new();
+    let api_key = adw::PasswordEntryRow::new();
     api_key.set_title("API key");
     api_key.set_show_apply_button(true);
     api_group.add(&api_key);
@@ -897,7 +897,7 @@ fn pexels_page(settings: &gio::Settings) -> (adw::PreferencesPage, adw::EntryRow
     (page, api_key)
 }
 
-fn pixabay_page(settings: &gio::Settings) -> (adw::PreferencesPage, adw::EntryRow) {
+fn pixabay_page(settings: &gio::Settings) -> (adw::PreferencesPage, adw::PasswordEntryRow) {
     let page = adw::PreferencesPage::new();
     page.set_title("Pixabay");
 
@@ -905,7 +905,7 @@ fn pixabay_page(settings: &gio::Settings) -> (adw::PreferencesPage, adw::EntryRo
     api_group.set_title("API");
     page.add(&api_group);
 
-    let api_key = adw::EntryRow::new();
+    let api_key = adw::PasswordEntryRow::new();
     api_key.set_title("API key");
     api_key.set_show_apply_button(true);
     api_group.add(&api_key);
@@ -956,7 +956,7 @@ fn bing_page() -> adw::PreferencesPage {
 }
 
 /// NASA imagery: optional key (demo access works without one).
-fn nasa_page(key_row: adw::EntryRow) -> adw::PreferencesPage {
+fn nasa_page(key_row: adw::PasswordEntryRow) -> adw::PreferencesPage {
     let page = adw::PreferencesPage::new();
     page.set_title("NASA");
 
@@ -1117,7 +1117,7 @@ fn manual_page(settings: &gio::Settings) -> adw::PreferencesPage {
     page
 }
 
-fn unsplash_page(settings: &gio::Settings) -> (adw::PreferencesPage, adw::EntryRow) {
+fn unsplash_page(settings: &gio::Settings) -> (adw::PreferencesPage, adw::PasswordEntryRow) {
     let page = adw::PreferencesPage::new();
     page.set_title("Unsplash");
 
@@ -1125,7 +1125,7 @@ fn unsplash_page(settings: &gio::Settings) -> (adw::PreferencesPage, adw::EntryR
     api_group.set_title("API");
     page.add(&api_group);
 
-    let access_key = adw::EntryRow::new();
+    let access_key = adw::PasswordEntryRow::new();
     access_key.set_title("Access key");
     access_key.set_show_apply_button(true);
     api_group.add(&access_key);
