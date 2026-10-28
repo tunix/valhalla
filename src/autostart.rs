@@ -10,7 +10,9 @@
 //! `~/.var/app/<app-id>/config`, and the manifest must pass
 //! `--filesystem=xdg-config/autostart:create` so the host autostart
 //! directory is the real target. Writing through that mapping lands the
-//! entry where the session manager looks.
+//! entry where the session manager looks. The Exec line is
+//! `flatpak run <app-id> --daemon`: the host session cannot see the
+//! sandbox-internal binary, only the Flatpak launcher.
 
 use std::path::PathBuf;
 
@@ -19,20 +21,32 @@ const APP_ID: &str = "io.github.tunix.valhalla";
 /// Exec resolution by packaging mode:
 ///   - Native/deb/rpm: `valhalla --daemon` via PATH (binary installed to
 ///     /usr/bin or ~/.cargo/bin).
-///   - Flatpak: `valhalla --daemon` via PATH (flatpak exports the launcher
-///     on PATH in the session; sandbox-internal current_exe is unusable).
+///   - Flatpak: the sandbox-internal binary is invisible to the host
+///     session, so the entry must go through the Flatpak launcher:
+///     `flatpak run <app-id> --daemon`. Detection is /.flatpak-info
+///     (see [`crate::applier::is_flatpak`]), which only exists inside
+///     the sandbox — exactly where this entry gets written.
 ///   - AppImage: the binary only exists under a transient /tmp/.mount_*
 ///     mount, so PATH is not an option — the entry must point at the
 ///     AppImage file itself (the path is stable as long as the user keeps
 ///     the file where it is, which is the normal case).
 fn exec_command() -> String {
+    exec_command_for(crate::applier::is_flatpak())
+}
+
+/// [`exec_command`] with Flatpak detection injected, so tests can exercise
+/// each packaging mode without a real /.flatpak-info.
+fn exec_command_for(flatpak: bool) -> String {
     // AppImage runtime sets $APPIMAGE to the absolute path of the file.
-    match std::env::var("APPIMAGE") {
-        Ok(path) if !path.is_empty() && std::path::Path::new(&path).is_file() => {
-            format!("{path:?} --daemon") // quoted: paths may contain spaces
+    if let Ok(path) = std::env::var("APPIMAGE") {
+        if !path.is_empty() && std::path::Path::new(&path).is_file() {
+            return format!("{path:?} --daemon"); // quoted: paths may contain spaces
         }
-        _ => "valhalla --daemon".to_string(),
     }
+    if flatpak {
+        return format!("flatpak run {APP_ID} --daemon");
+    }
+    "valhalla --daemon".to_string()
 }
 
 const ENTRY_TEMPLATE: &str = r#"[Desktop Entry]
@@ -172,5 +186,20 @@ mod tests {
         let cmd = exec_command();
         std::env::remove_var("APPIMAGE");
         assert_eq!(cmd, "valhalla --daemon");
+
+        // 7c) Flatpak mode: the host session must launch through the
+        // Flatpak launcher, not the invisible sandbox binary.
+        let cmd = exec_command_for(true);
+        assert_eq!(cmd, format!("flatpak run {APP_ID} --daemon"));
+
+        // 7d) AppImage wins over Flatpak (order-of-precedence guard).
+        let fake =
+            std::env::temp_dir().join(format!("fake-appimage-{}.AppImage", std::process::id()));
+        std::fs::write(&fake, b"magma").unwrap();
+        std::env::set_var("APPIMAGE", &fake);
+        let cmd = exec_command_for(true);
+        std::env::remove_var("APPIMAGE");
+        std::fs::remove_file(&fake).ok();
+        assert!(cmd.ends_with("\" --daemon"), "cmd: {cmd}");
     }
 }
