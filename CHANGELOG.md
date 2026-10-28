@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.5.2](https://github.com/tunix/valhalla/compare/v1.5.1...v1.5.2) (2026-10-28)
+
+
+### Bug Fixes
+
+* **autostart:** launch via flatpak run when running as a Flatpak ([e62a73a](https://github.com/tunix/valhalla/commit/e62a73a085cb4f79e614f1a26d080b870ea69e88))
+* **autostart:** launch via flatpak run when running as a Flatpak ([#90](https://github.com/tunix/valhalla/issues/90)) ([4bf8455](https://github.com/tunix/valhalla/commit/4bf8455e2429f031dd401b53c64cc8f7298c5f8d))
+
 ## [1.5.1](https://github.com/tunix/valhalla/compare/v1.5.0...v1.5.1) (2026-10-20)
 
 
