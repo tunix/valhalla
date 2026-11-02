@@ -53,8 +53,13 @@
     </key>
     <key name="manual-paths" type="s">
       <default>""</default>
-      <summary>Manual wallpaper paths</summary>
-      <description>Newline-separated absolute paths picked by the user (files or expanded directory contents).</description>
+      <summary>Manual wallpaper paths (obsolete)</summary>
+      <description>Obsolete newline-separated form, migrated to manual-folders on first read. Do not write.</description>
+    </key>
+    <key name="manual-folders" type="as">
+      <default>[]</default>
+      <summary>Manual wallpaper folders</summary>
+      <description>Absolute paths picked by the user: folders whose images cycle, plus legacy file entries.</description>
     </key>
     <key name="start-at-login" type="b">
       <default>false</default>
