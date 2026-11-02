@@ -24,6 +24,23 @@ pub fn tokio_handle() -> &'static tokio::runtime::Handle {
 }
 
 fn main() {
+    // GSettings schemas cannot be loaded from a GResource; GLib reads
+    // compiled schemas from the XDG data dirs and GSETTINGS_SCHEMA_DIR
+    // only. The portable artifacts (tarball, AppImage) ship
+    // gschemas.compiled next to the binary, so point the schema search
+    // there before the first Settings use. Never override an explicit
+    // GSETTINGS_SCHEMA_DIR: AppRun exports its own, and the headless test
+    // harness pins a temp schema dir.
+    if std::env::var_os("GSETTINGS_SCHEMA_DIR").is_none() {
+        if let Ok(exe) = std::fs::read_link("/proc/self/exe") {
+            if let Some(dir) = exe.parent() {
+                if dir.join("gschemas.compiled").is_file() {
+                    std::env::set_var("GSETTINGS_SCHEMA_DIR", dir);
+                }
+            }
+        }
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()

@@ -102,7 +102,31 @@ jobs:
       - name: Package tarball
         run: |
           install -D -m 0755 target/release/valhalla "valhalla-${TAG}/valhalla"
+          # GLib reads schemas only from compiled dirs (XDG data dirs +
+          # GSETTINGS_SCHEMA_DIR), never from a GResource — ship the
+          # compiled schema next to the binary so the bare tarball starts.
+          install -D -m 0644 target/release/gschemas.compiled \
+            "valhalla-${TAG}/gschemas.compiled"
           tar -czf "valhalla-${TAG}-${ARCH}.tar.gz" "valhalla-${TAG}"
+
+      # Regression gate (v1.5.2 shipped a tarball that aborted at startup
+      # with "Settings schema 'io.github.tunix.valhalla' is not installed"):
+      # the packaged binary must survive startup with NO installed schema.
+      # The daemon runs until killed, so pass = timeout's exit 124; the
+      # GLib-GIO abort surfaces as 134/101 and fails the step.
+      - name: Smoke test packaged tarball in a clean env
+        run: |
+          set -eu
+          command -v dbus-run-session >/dev/null || dnf install -y dbus-daemon
+          tar -xzf "valhalla-${TAG}-${ARCH}.tar.gz"
+          mkdir scratch
+          export XDG_CONFIG_HOME="$PWD/scratch" XDG_DATA_HOME="$PWD/scratch" XDG_CACHE_HOME="$PWD/scratch"
+          rc=0
+          dbus-run-session -- timeout 10 "./valhalla-${TAG}/valhalla" --daemon || rc=$?
+          if [ "$rc" -ne 124 ]; then
+            echo "::error::packaged tarball binary did not survive clean-env startup (exit $rc)"
+            exit 1
+          fi
 
       # The release is created as a draft by release-please (see
       # release-please-config.json at the repo root): uploads must happen before
@@ -246,6 +270,11 @@ jobs:
           set -eu
           APPDIR=AppDir
           install -D -m 0755 target/release/valhalla "$APPDIR/usr/bin/valhalla"
+          # Bare-binary runs (extracted from the AppImage) find the schema
+          # via the exe-dir lookup in main.rs; AppRun keeps pointing at the
+          # installed schema dir below.
+          install -D -m 0644 target/release/gschemas.compiled \
+            "$APPDIR/usr/bin/gschemas.compiled"
           install -D -m 0644 data/io.github.tunix.valhalla.desktop.in \
             "$APPDIR/usr/share/applications/io.github.tunix.valhalla.desktop"
           install -D -m 0644 data/io.github.tunix.valhalla.metainfo.xml \
