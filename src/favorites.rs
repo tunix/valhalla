@@ -49,20 +49,20 @@ fn list_path() -> PathBuf {
 }
 
 /// Small pre-scaled copies used for brightness analysis: `thumbs/<id>.jpg`.
-fn thumbs_dir() -> PathBuf {
+pub(crate) fn thumbs_dir() -> PathBuf {
     let dir = favorites_dir().join("thumbs");
     let _ = std::fs::create_dir_all(&dir);
     dir
 }
 
-fn thumb_path(id: &str) -> PathBuf {
+pub(crate) fn thumb_path(id: &str) -> PathBuf {
     thumbs_dir().join(format!("{}.jpg", sanitize_id(id)))
 }
 
 /// Long edge of the analysis thumbnail. Brightness sampling downscales to
 /// 64×64 anyway (see `brightness::analyze_image`); 256 keeps the stored
 /// thumbnail tiny while leaving room for other uses.
-const THUMB_MAX_EDGE: u32 = 256;
+pub(crate) const THUMB_MAX_EDGE: u32 = 256;
 
 /// Return a path suitable for brightness analysis of the stored copy: the
 /// small thumbnail, generated once when missing, or — when generation
@@ -70,7 +70,7 @@ const THUMB_MAX_EDGE: u32 = 256;
 /// scheduler can still try to analyze it. With the thumbnail in place the
 /// analysis decodes a few KB per refresh instead of every full-size
 /// wallpaper, which is what keeps a Favorites refresh near-instant.
-fn ensure_thumb(id: &str, stored: &Path) -> PathBuf {
+pub(crate) fn ensure_thumb(id: &str, stored: &Path) -> PathBuf {
     let dest = thumb_path(id);
     if dest.exists() {
         return dest;

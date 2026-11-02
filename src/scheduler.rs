@@ -237,23 +237,28 @@ impl Core {
         let source = Source::from_id(self.settings.string("active-source").as_str())
             .unwrap_or(Source::Wallhaven);
         let (wh_key, un_key, px_key, pb_key, nasa_key) = {
-            // Keyring lookups are independent DBus round-trips: run them
-            // concurrently instead of paying five serial latencies on every
-            // refresh. Plain spawn_blocking (no global handle needed —
-            // refresh always runs inside the tokio runtime).
-            let (wh, un, px, pb, ns) = tokio::join!(
-                tokio::task::spawn_blocking(|| credentials::get("wallhaven")),
-                tokio::task::spawn_blocking(|| credentials::get("unsplash")),
-                tokio::task::spawn_blocking(|| credentials::get("pexels")),
-                tokio::task::spawn_blocking(|| credentials::get("pixabay")),
-                tokio::task::spawn_blocking(|| credentials::get("nasa")),
-            );
+            // Only the active source's key is read: local sources (Favorites,
+            // Manual, Bing) need no Secret Service at all, so their refreshes
+            // never touch the keyring — a stalled or missing Secret Service
+            // (slow DBus activation) would otherwise add its latency to every
+            // local refresh.
+            let wanted = source.keyring_source();
+            let key = |name: &'static str, wanted: Option<&'static str>| async move {
+                if wanted == Some(name) {
+                    tokio::task::spawn_blocking(move || credentials::get(name))
+                        .await
+                        .ok()
+                        .flatten()
+                } else {
+                    None
+                }
+            };
             (
-                wh.ok().flatten(),
-                un.ok().flatten(),
-                px.ok().flatten(),
-                pb.ok().flatten(),
-                ns.ok().flatten(),
+                key("wallhaven", wanted).await,
+                key("unsplash", wanted).await,
+                key("pexels", wanted).await,
+                key("pixabay", wanted).await,
+                key("nasa", wanted).await,
             )
         };
         let screen = config::screen_geometry(&self.settings);

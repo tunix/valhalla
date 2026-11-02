@@ -1,38 +1,77 @@
-//! Manual source: wallpapers the user picked — N files and/or a directory
-//! (all images inside). Persisted as an absolute path list; candidates
-//! cycle from local files, no network. Theme-matching runs on the local
-//! image via the scheduler's brightness analysis, same as Favorites.
+//! Manual source: folders the user picked — every image inside (one level,
+//! non-recursive) becomes a candidate. Persisted as an absolute path list;
+//! candidates cycle from local files, no network. Theme-matching runs on
+//! the local image via the scheduler's brightness analysis, same as
+//! Favorites — against a small cached thumbnail (one per file version), so
+//! a refresh never full-decodes the actual wallpapers and stays instant.
+//! Legacy `manual-paths` entries that point at files keep working: they
+//! are kept in the list and still served.
 
 use gio::prelude::*;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
-/// Settings key storing the picked paths (newline-separated). GSettings
-/// string arrays would be nicer but a plain string survives the simple
-/// schema and the few-path scale we target.
-const PATHS_KEY: &str = "manual-paths";
+/// Settings key storing the picked paths as a GSettings string array
+/// (`as`) — one path per element, the native dconf representation.
+const PATHS_KEY: &str = "manual-folders";
+
+/// Older builds stored the paths in `manual-paths` as a single
+/// newline-separated string. That key is kept in the schema (type `s`) so
+/// existing user data stays readable — a type change would make GSettings
+/// silently drop the old value — and is migrated to [`PATHS_KEY`] on first
+/// read, then reset to its default.
+const LEGACY_KEY: &str = "manual-paths";
 
 /// Same settings instance the app/daemon uses.
 pub fn settings() -> gio::Settings {
     crate::config::settings()
 }
 
-pub fn paths_with(s: &gio::Settings) -> Vec<PathBuf> {
-    s.string(PATHS_KEY)
+/// One-time conversion of the legacy `manual-paths` string into the
+/// `manual-folders` array. Idempotent: the legacy key is reset after a
+/// successful migration, so a second call finds no user value and does
+/// nothing. Never clobbers newer `manual-folders` data.
+fn migrate_legacy(s: &gio::Settings) {
+    if s.user_value(PATHS_KEY).is_some() {
+        return; // already using the array key — leave it alone
+    }
+    let Some(user) = s.user_value(LEGACY_KEY) else {
+        return; // nothing to migrate
+    };
+    // Old format: one string, paths joined by newlines.
+    let legacy: Vec<String> = user
+        .str()
+        .unwrap_or("")
         .split('\n')
+        .filter(|l| !l.is_empty())
+        .map(str::to_string)
+        .collect();
+    if legacy.is_empty() {
+        return;
+    }
+    if s.set_strv(PATHS_KEY, legacy).is_ok() {
+        s.reset(LEGACY_KEY); // migration complete: drop the old value
+    }
+}
+
+pub fn paths_with(s: &gio::Settings) -> Vec<PathBuf> {
+    migrate_legacy(s);
+    s.strv(PATHS_KEY)
+        .into_iter()
         .filter(|l| !l.is_empty())
         .map(PathBuf::from)
         .collect()
 }
 
-/// Replace the picked set (files + directories already expanded by the
-/// caller). Persists as newline-separated absolute paths.
+/// Replace the picked set (folders + legacy file entries). Persists as a
+/// GSettings string array.
 pub fn store_with(s: &gio::Settings, paths: &[PathBuf]) -> Result<(), String> {
-    let joined = paths
+    let strv: Vec<String> = paths
         .iter()
         .map(|p| p.to_string_lossy().into_owned())
-        .collect::<Vec<_>>()
-        .join("\n");
-    s.set_string(PATHS_KEY, &joined).map_err(|e| e.to_string())
+        .collect();
+    s.set_strv(PATHS_KEY, strv).map_err(|e| e.to_string())
 }
 
 /// Convenience wrappers: open the default settings themselves (UI callers
@@ -48,50 +87,50 @@ pub fn store(paths: &[PathBuf]) -> Result<(), String> {
 /// Image extensions we accept when expanding a directory.
 const IMAGE_EXTS: &[&str] = &["jpg", "jpeg", "png", "webp", "bmp", "avif"];
 
-/// Expand `paths` (files kept, directories expanded one level — non-
-/// recursive by design: the user picked a folder, not a tree) into the
-/// stored list. Skips non-images and duplicates, preserves order.
+fn is_image_file(p: &Path) -> bool {
+    p.is_file()
+        && p.extension()
+            .and_then(|e| e.to_str())
+            .map(|e| IMAGE_EXTS.contains(&e.to_ascii_lowercase().as_str()))
+            .unwrap_or(false)
+}
+
+/// Images directly inside `dir` (one level, sorted deterministically).
+fn images_in_dir(dir: &Path) -> Result<Vec<PathBuf>, String> {
+    let mut entries: Vec<PathBuf> = std::fs::read_dir(dir)
+        .map_err(|e| format!("read_dir {}: {e}", dir.display()))?
+        .filter_map(|r| r.ok())
+        .map(|r| r.path())
+        .filter(|f| is_image_file(f))
+        .collect();
+    entries.sort();
+    Ok(entries)
+}
+
+/// Add folders (and, for legacy callers, individual image files) to the
+/// stored list. Duplicates are skipped; order is preserved. Returns the
+/// entries actually added.
 pub fn add(picked: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
     let mut current = paths();
     let mut added = Vec::new();
     for p in picked {
         if p.is_dir() {
-            let mut entries: Vec<PathBuf> = std::fs::read_dir(p)
-                .map_err(|e| format!("read_dir {}: {e}", p.display()))?
-                .filter_map(|r| r.ok())
-                .map(|r| r.path())
-                .filter(|f| {
-                    f.is_file()
-                        && f.extension()
-                            .and_then(|e| e.to_str())
-                            .map(|e| IMAGE_EXTS.contains(&e.to_ascii_lowercase().as_str()))
-                            .unwrap_or(false)
-                })
-                .collect();
-            entries.sort(); // deterministic order within a directory
-            for e in entries {
-                if !current.contains(&e) && !added.contains(&e) {
-                    current.push(e.clone());
-                    added.push(e);
-                }
+            if current.contains(p) || added.contains(p) {
+                continue; // folder already tracked
             }
-        } else if p.is_file()
-            && p.extension()
-                .and_then(|e| e.to_str())
-                .map(|e| IMAGE_EXTS.contains(&e.to_ascii_lowercase().as_str()))
-                .unwrap_or(false)
-            && !current.contains(p)
-            && !added.contains(p)
-        {
-            current.push(p.clone());
+            added.push(p.clone());
+        } else if is_image_file(p) && !current.contains(p) && !added.contains(p) {
             added.push(p.clone());
         }
+        // Legacy file entries are only queued in `added` here — they are
+        // appended to `current` once below, so they are never duplicated.
     }
+    current.extend(added.iter().cloned());
     store(&current)?;
     Ok(added)
 }
 
-/// Drop a path from the stored list.
+/// Drop a path (a tracked folder or a legacy file entry) from the list.
 pub fn remove(path: &Path) -> Result<(), String> {
     let current = paths();
     let remaining: Vec<PathBuf> = current
@@ -106,32 +145,134 @@ pub fn remove(path: &Path) -> Result<(), String> {
 }
 
 /// Present the manual set as refreshable candidates (file:// URLs like
-/// Favorites — the scheduler short-circuits download + analysis).
+/// Favorites — the scheduler short-circuits download + analysis). Every
+/// tracked folder contributes all images inside it (one level), so
+/// multiple folders loop together; legacy file entries are served too.
+/// Vanished folders/files are pruned lazily.
 pub fn candidates() -> Result<Vec<crate::source::Candidate>, String> {
-    let paths = paths();
-    if paths.is_empty() {
-        return Err("No wallpapers selected — pick files or a folder in Preferences".into());
+    let stored = paths();
+    if stored.is_empty() {
+        return Err("No wallpapers selected — pick a folder in Preferences".into());
     }
-    Ok(paths
-        .into_iter()
-        .filter(|p| p.is_file()) // prune vanished files lazily
-        .map(|p| {
-            let id = format!("manual:{}", p.display());
-            crate::source::Candidate {
-                id: id.clone(),
-                source: "manual",
-                image_url: format!("file://{}", p.display()),
-                thumb_url: format!("file://{}", p.display()),
-                web_url: String::new(),
-                title: p
-                    .file_stem()
-                    .and_then(|n| n.to_str())
-                    .map(|n| n.to_string()),
-                author: None,
-                dominant_colors: Vec::new(),
+    let mut cands = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for p in stored {
+        let items: Vec<PathBuf> = if p.is_dir() {
+            match images_in_dir(&p) {
+                Ok(items) => items,
+                Err(e) => {
+                    tracing::warn!("manual: {e}");
+                    Vec::new()
+                }
             }
-        })
-        .collect())
+        } else if is_image_file(&p) {
+            vec![p]
+        } else {
+            Vec::new() // vanished file or unreadable path — prune lazily
+        };
+        for image in items {
+            if seen.insert(image.clone()) {
+                cands.push(candidate_for(&image));
+            }
+        }
+    }
+    if cands.is_empty() {
+        return Err("No images found in the selected folders".into());
+    }
+    Ok(cands)
+}
+
+/// Analysis-thumbnail cache key: path + file size + mtime. Editing or
+/// replacing a folder's image produces a fresh key, so stale thumbnails
+/// never serve analysis; unchanged files hit the cached copy instantly.
+fn thumb_key(p: &Path) -> String {
+    let (size, mtime) = match std::fs::metadata(p) {
+        Ok(m) => (
+            m.len(),
+            m.modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_nanos())
+                .unwrap_or(0),
+        ),
+        Err(_) => (0, 0),
+    };
+    let mut hasher = DefaultHasher::new();
+    p.hash(&mut hasher);
+    hasher.write_u64(size);
+    hasher.write_u128(mtime);
+    format!("{:016x}", hasher.finish())
+}
+
+/// Small pre-scaled analysis copy for a manual image, shared with the
+/// Favorites thumbnail store (`thumbs/`), keyed by path+size+mtime —
+/// generated once per file version, reused on every refresh. Mirrors
+/// `favorites::ensure_thumb`: without it the scheduler would full-decode
+/// every wallpaper on each refresh, seconds of work that feels exactly
+/// like a network download.
+fn ensure_thumb(p: &Path) -> PathBuf {
+    let key = thumb_key(p);
+    let dest = crate::favorites::thumb_path(&format!("manual-{key}"));
+    if dest.exists() {
+        return dest;
+    }
+    let generated = (|| -> Result<PathBuf, String> {
+        // Same bound as favorites: brightness sampling downscales to 64×64
+        // anyway, and small sources are analyzed directly (no decode).
+        let dims = image::ImageReader::open(p)
+            .and_then(|r| r.with_guessed_format())
+            .map_err(|e| e.to_string())?
+            .into_dimensions()
+            .map_err(|e| e.to_string())?;
+        if dims.0.max(dims.1) <= crate::favorites::THUMB_MAX_EDGE {
+            return Ok(p.to_path_buf());
+        }
+        let img = image::ImageReader::open(p)
+            .and_then(|r| r.with_guessed_format())
+            .map_err(|e| e.to_string())?
+            .decode()
+            .map_err(|e| e.to_string())?;
+        let small = img.thumbnail(
+            crate::favorites::THUMB_MAX_EDGE,
+            crate::favorites::THUMB_MAX_EDGE,
+        );
+        // tmp + rename so a concurrent refresh never sees a half-written
+        // thumbnail (same pattern as favorites::ensure_thumb).
+        let tmp = crate::favorites::thumbs_dir().join(format!("manual-{key}.tmp"));
+        small
+            .write_to(
+                &mut std::io::BufWriter::new(
+                    std::fs::File::create(&tmp).map_err(|e| e.to_string())?,
+                ),
+                image::ImageFormat::Jpeg,
+            )
+            .map_err(|e| e.to_string())?;
+        std::fs::rename(&tmp, &dest).map_err(|e| e.to_string())?;
+        Ok(dest)
+    })();
+    match generated {
+        Ok(path) => path,
+        Err(e) => {
+            tracing::debug!("thumbnail for manual {p:?} not generated: {e}");
+            p.to_path_buf() // scheduler falls back to the full-size decode
+        }
+    }
+}
+
+fn candidate_for(p: &Path) -> crate::source::Candidate {
+    crate::source::Candidate {
+        id: format!("manual:{}", p.display()),
+        source: "manual",
+        image_url: format!("file://{}", p.display()),
+        thumb_url: format!("file://{}", ensure_thumb(p).display()),
+        web_url: String::new(),
+        title: p
+            .file_stem()
+            .and_then(|n| n.to_str())
+            .map(|n| n.to_string()),
+        author: None,
+        dominant_colors: Vec::new(),
+    }
 }
 
 #[cfg(test)]
@@ -169,69 +310,92 @@ mod tests {
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         let s = temp_settings("manual");
-        // Memory backend persists across tests in one process — start clean.
-        settings().set_string(PATHS_KEY, "").unwrap();
+        // Memory backend persists across tests in one process — start clean
+        // on BOTH keys (the legacy one would otherwise migrate into runs).
+        settings().reset(PATHS_KEY);
+        settings().reset(LEGACY_KEY);
         let tmp = std::env::temp_dir().join(format!("valhalla-manual-{}", std::process::id()));
         let _ = fs::remove_dir_all(&tmp);
         fs::create_dir_all(&tmp).unwrap();
         fs::create_dir_all(tmp.join("folder")).unwrap();
+        fs::create_dir_all(tmp.join("folder2")).unwrap();
 
         let a = make_image(&tmp, "a.jpg");
-        let b = make_image(&tmp, "b.png");
-        let c = make_image(&tmp.join("folder"), "c.jpg");
+        let _b = make_image(&tmp, "b.png");
+        let _c = make_image(&tmp.join("folder"), "c.jpg");
+        let _d = make_image(&tmp.join("folder2"), "d.jpg");
         let txt = tmp.join("notes.txt");
         fs::write(&txt, b"not an image").unwrap();
 
         // 1) empty state (reset may race other tests on the shared memory
         // backend, so assert on the reset itself rather than isolation)
-        s.set_string(PATHS_KEY, "").unwrap();
+        s.reset(PATHS_KEY);
         assert!(paths().is_empty());
         assert!(candidates().is_err()); // graceful empty error
 
-        // 2) add files
-        let added = add(&[a.clone(), b.clone()]).expect("add files");
-        assert_eq!(added.len(), 2);
-        assert_eq!(paths().len(), 2);
-
-        // 3) add a directory — images only, sorted, no notes.txt
+        // 2) folders are stored as folders, not expanded at add time
         let added = add(&[tmp.join("folder")]).expect("add dir");
-        assert_eq!(added, vec![c.clone()]);
-        let all = paths();
-        assert_eq!(all.len(), 3);
-        assert!(!all.contains(&txt), "non-image must be skipped");
+        assert_eq!(added, vec![tmp.join("folder")]);
 
-        // 4) duplicates are skipped
-        let added = add(&[a.clone(), tmp.join("folder")]).expect("re-add");
-        assert!(added.is_empty());
-        assert_eq!(paths().len(), 3);
+        // 3) candidates expand the folder: images only, sorted, no notes.txt
+        let cands = candidates().expect("candidates");
+        assert_eq!(cands.len(), 1);
+        assert!(cands[0].image_url.ends_with("c.jpg"));
+        assert_eq!(cands[0].source, "manual");
+        assert_eq!(cands[0].title.as_deref(), Some("c"));
 
-        // 5) candidates carry file:// URLs and stem titles
+        // 4) a second folder loops together with the first; duplicates
+        // across folders are served once
+        let added = add(&[tmp.join("folder2")]).expect("add second dir");
+        assert_eq!(added.len(), 1);
+        let cands = candidates().expect("candidates");
+        assert_eq!(cands.len(), 2, "both folders must contribute");
+
+        // 5) legacy file entries still work alongside folders
+        let added = add(std::slice::from_ref(&a)).expect("add legacy file");
+        assert_eq!(added, vec![a.clone()]);
         let cands = candidates().expect("candidates");
         assert_eq!(cands.len(), 3);
         let cand_a = cands.iter().find(|c| c.id.contains("a.jpg")).unwrap();
         assert!(cand_a.image_url.starts_with("file://"));
-        assert!(cand_a.image_url.ends_with("a.jpg"));
-        assert_eq!(cand_a.source, "manual");
         assert_eq!(cand_a.title.as_deref(), Some("a"));
 
-        // 6) remove drops the entry
-        remove(&a).expect("remove");
+        // 6) duplicates are skipped (folder and file)
+        let added = add(&[tmp.join("folder"), a.clone()]).expect("re-add");
+        assert!(added.is_empty());
+        assert_eq!(paths().len(), 3);
+
+        // 7) remove drops a tracked folder; the other folder + file remain
+        remove(&tmp.join("folder")).expect("remove");
         let all = paths();
         assert_eq!(all.len(), 2);
-        assert!(!all.contains(&a));
-
-        // 7) vanished file pruned lazily at candidates()
-        let stale = make_image(&tmp, "stale.jpg");
-        let mut all = paths();
-        all.push(stale.clone());
-        store_with(&s, &all).expect("store");
-        fs::remove_file(&stale).unwrap();
+        assert!(!all.contains(&tmp.join("folder")));
         let cands = candidates().expect("candidates");
-        assert!(!cands.iter().any(|c| c.id.contains("stale")));
+        assert_eq!(cands.len(), 2, "folder2 + legacy file");
 
-        // 8) non-image file add is skipped (not a dir, but not an image ext)
+        // 8) vanished folder pruned lazily at candidates()
+        let ghost = tmp.join("gone");
+        fs::create_dir_all(&ghost).unwrap();
+        add(std::slice::from_ref(&ghost)).unwrap();
+        fs::remove_dir(&ghost).unwrap();
+        let cands = candidates().expect("candidates");
+        assert!(!cands.iter().any(|c| c.id.contains("gone")));
+
+        // 9) non-image file add is skipped (not a dir, not an image ext)
         let added = add(std::slice::from_ref(&txt)).expect("add txt");
         assert!(added.is_empty(), "non-image file must be skipped");
+
+        // 10) empty-but-tracked folders give a graceful error, not a panic
+        s.reset(PATHS_KEY);
+        // nonexistent path is neither dir nor file -> skipped silently
+        let added = add(&[tmp.join("empty-never-created")]).expect("nonexistent skipped");
+        assert!(added.is_empty());
+        fs::create_dir_all(tmp.join("empty")).unwrap();
+        add(&[tmp.join("empty")]).unwrap();
+        assert!(
+            candidates().is_err(),
+            "folder with no images must error gracefully"
+        );
 
         fs::remove_dir_all(&tmp).ok();
     }
@@ -251,11 +415,183 @@ mod tests {
         store_with(&s, &[p1.clone(), p2.clone()]).expect("store");
         let read = paths_with(&s);
         assert_eq!(read, vec![p1, p2]);
+    }
 
-        // whitespace/empty lines in the stored string are skipped
-        s.set_string(PATHS_KEY, "\n/tmp/a.jpg\n\n/tmp/b.jpg\n")
+    #[test]
+    fn legacy_string_value_migrates_to_array() {
+        // Pre-array builds stored manual-paths as one newline-separated
+        // string; the first read migrates it into manual-folders (a real
+        // string array — dconf shows @as [...]) and resets the old key.
+        let _env = crate::http::test_env::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let s = temp_settings("migrate");
+        s.reset(PATHS_KEY);
+        s.set_string(LEGACY_KEY, "/tmp/a.jpg\n/tmp/b dir\n")
             .unwrap();
         let read = paths_with(&s);
-        assert_eq!(read.len(), 2, "empty lines must be skipped");
+        assert_eq!(
+            read,
+            vec![PathBuf::from("/tmp/a.jpg"), PathBuf::from("/tmp/b dir")]
+        );
+        // The migration persisted: the new key holds a real array (dconf
+        // shows @as [...]) with both paths, and the legacy key is back at
+        // its default — no lingering user data.
+        assert_eq!(
+            s.user_value(PATHS_KEY).unwrap().type_().as_str(),
+            "as",
+            "migrated value must be a string array"
+        );
+        assert!(s.user_value(LEGACY_KEY).is_none());
+        // Idempotent: a second read is a no-op and keeps the data.
+        assert_eq!(paths_with(&s), read);
+
+        // New data written after a migration is never clobbered by the
+        // legacy key.
+        store_with(&s, &[PathBuf::from("/tmp/new.png")]).unwrap();
+        assert_eq!(paths_with(&s), vec![PathBuf::from("/tmp/new.png")]);
+        s.reset(PATHS_KEY);
+        s.reset(LEGACY_KEY);
+    }
+
+    #[test]
+    fn thumb_cache_reuses_and_invalidates() {
+        // Analysis thumbnails are cached under the favorites thumbs store,
+        // keyed by path+size+mtime: unchanged files reuse the cached copy,
+        // an edited file gets a fresh one. XDG_DATA_HOME is process-global —
+        // held under ENV_LOCK like every other env-mutating test.
+        let _env = crate::http::test_env::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let tmp =
+            std::env::temp_dir().join(format!("valhalla-manual-thumb-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+
+        // A large image (> 256px) forces a real thumbnail generation.
+        let big = tmp.join("big.jpg");
+        let img = image::RgbImage::from_pixel(512, 512, image::Rgb([200, 100, 50]));
+        image::DynamicImage::ImageRgb8(img)
+            .write_to(
+                &mut std::io::BufWriter::new(fs::File::create(&big).unwrap()),
+                image::ImageFormat::Jpeg,
+            )
+            .unwrap();
+
+        // First candidates() call generates the thumbnail; the served
+        // thumb_url points at the small cached copy, not the full image.
+        store(std::slice::from_ref(&big)).unwrap();
+        let cands = candidates().expect("candidates");
+        let thumb = PathBuf::from(cands[0].thumb_url.strip_prefix("file://").unwrap());
+        assert!(thumb.is_file(), "cached thumbnail must exist");
+        assert_ne!(thumb, big, "thumb_url must be the cached copy");
+        let dims = image::ImageReader::open(&thumb)
+            .unwrap()
+            .into_dimensions()
+            .unwrap();
+        assert!(dims.0.max(dims.1) <= crate::favorites::THUMB_MAX_EDGE);
+
+        // Second call with an unchanged file reuses the same file (mtime
+        // untouched) — the instant-refresh path.
+        let mtime = fs::metadata(&thumb).unwrap().modified().unwrap();
+        candidates().expect("second candidates");
+        assert_eq!(
+            fs::metadata(&thumb).unwrap().modified().unwrap(),
+            mtime,
+            "thumbnail must be reused, not regenerated"
+        );
+
+        // Replacing the file (new content -> new size) invalidates the
+        // cache: a fresh thumbnail is generated for the new version.
+        let img2 = image::RgbImage::from_pixel(600, 400, image::Rgb([10, 200, 80]));
+        image::DynamicImage::ImageRgb8(img2)
+            .write_to(
+                &mut std::io::BufWriter::new(fs::File::create(&big).unwrap()),
+                image::ImageFormat::Jpeg,
+            )
+            .unwrap();
+        candidates().expect("candidates after edit");
+        let cands = candidates().expect("candidates");
+        let thumb2 = PathBuf::from(cands[0].thumb_url.strip_prefix("file://").unwrap());
+        assert_ne!(thumb2, thumb, "edited file must get a new thumbnail");
+
+        // A corrupt source falls back gracefully: the full-size path is
+        // handed to the scheduler (which then skips the candidate), no panic.
+        let corrupt = tmp.join("corrupt.jpg");
+        fs::write(&corrupt, b"not an image").unwrap();
+        store(std::slice::from_ref(&corrupt)).unwrap();
+        let cands = candidates().expect("candidates with corrupt file");
+        let c = cands.iter().find(|c| c.id.contains("corrupt")).unwrap();
+        assert!(c.thumb_url.ends_with("corrupt.jpg"));
+
+        fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn thumb_analysis_is_far_cheaper_than_full_decode() {
+        // The reason for the thumbnail cache, stated as a budget: analyzing
+        // a cache-hitting manual candidate must cost a fraction of a full
+        // wallpaper decode. Real-size synthetic images (2560×1440 JPEG).
+        let _env = crate::http::test_env::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let tmp =
+            std::env::temp_dir().join(format!("valhalla-manual-bench-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+        let big = tmp.join("wide.jpg");
+        let img = image::RgbImage::from_pixel(2560, 1440, image::Rgb([120, 130, 140]));
+        image::DynamicImage::ImageRgb8(img)
+            .write_to(
+                &mut std::io::BufWriter::new(fs::File::create(&big).unwrap()),
+                image::ImageFormat::Jpeg,
+            )
+            .unwrap();
+
+        // Cold: first candidates() generates the thumbnail.
+        let cold_start = std::time::Instant::now();
+        store(std::slice::from_ref(&big)).unwrap();
+        let cands = candidates().expect("candidates");
+        let cold = cold_start.elapsed();
+        let thumb_bytes = fs::read(
+            cands[0]
+                .thumb_url
+                .strip_prefix("file://")
+                .expect("file thumb"),
+        )
+        .unwrap();
+        assert!(
+            thumb_bytes.len() < 100 * 1024,
+            "thumb is small, not the full image"
+        );
+
+        // Warm: cache hit — analyze from the cached thumb bytes.
+        let warm_start = std::time::Instant::now();
+        let cands = candidates().expect("warm candidates");
+        let bytes = fs::read(
+            cands[0]
+                .thumb_url
+                .strip_prefix("file://")
+                .expect("file thumb"),
+        )
+        .unwrap();
+        crate::brightness::analyze(&bytes).expect("analyze thumb");
+        let warm = warm_start.elapsed();
+
+        // What the cache saves: a full-size decode + analysis.
+        let full_start = std::time::Instant::now();
+        let full_bytes = fs::read(&big).unwrap();
+        crate::brightness::analyze(&full_bytes).expect("analyze full");
+        let full = full_start.elapsed();
+
+        eprintln!(
+            "manual refresh analysis budget: warm(cached)={warm:?}, cold(gen+analyze)={cold:?}, full-decode={full:?}"
+        );
+        assert!(
+            warm < full / 3,
+            "cached analysis must be far cheaper than full decode (warm={warm:?}, full={full:?})"
+        );
+
+        fs::remove_dir_all(&tmp).ok();
     }
 }
