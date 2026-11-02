@@ -75,6 +75,21 @@ impl Source {
         Source::ALL.into_iter().find(|s| s.id() == id)
     }
 
+    /// The Secret Service credential this source reads at refresh time, if
+    /// any. Local sources read nothing — their refreshes skip the keyring
+    /// entirely, so a stalled Secret Service (slow activation, missing
+    /// daemon) cannot delay a local wallpaper swap.
+    pub fn keyring_source(self) -> Option<&'static str> {
+        match self {
+            Source::Wallhaven => Some("wallhaven"),
+            Source::Unsplash => Some("unsplash"),
+            Source::Pexels => Some("pexels"),
+            Source::Pixabay => Some("pixabay"),
+            Source::Nasa => Some("nasa"),
+            Source::Bing | Source::Favorites | Source::Manual => None,
+        }
+    }
+
     pub async fn candidates(
         &self,
         wallhaven: &crate::config::WallhavenCfg,

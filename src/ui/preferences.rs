@@ -976,8 +976,8 @@ fn nasa_page(key_row: adw::PasswordEntryRow) -> adw::PreferencesPage {
     page
 }
 
-/// Manual source page: pick individual files and/or a directory (all images
-/// inside are added). The selected set is listed and removable.
+/// Manual source page: pick folders — every image inside (one level) is
+/// cycled. The tracked folder list is shown and removable.
 fn manual_page(settings: &gio::Settings) -> adw::PreferencesPage {
     use adw::prelude::*;
 
@@ -985,24 +985,23 @@ fn manual_page(settings: &gio::Settings) -> adw::PreferencesPage {
     page.set_title("Manual");
 
     let group = adw::PreferencesGroup::new();
-    group.set_title("Your wallpapers");
+    group.set_title("Your folders");
     group.set_description(Some(
-        "Files and folders cycle with the theme-matching engine; stored locally, used offline.",
+        "All images in these folders cycle with the theme-matching engine; stored locally, used offline.",
     ));
     page.add(&group);
 
-    // Pick buttons row
+    // Pick button row
     let pick_box = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-    let pick_files = gtk::Button::with_label("Add files…");
-    pick_files.add_css_class("suggested-action");
     let pick_dir = gtk::Button::with_label("Add folder…");
-    pick_dir.add_css_class("flat");
-    pick_box.append(&pick_files);
+    pick_dir.add_css_class("suggested-action");
     pick_box.append(&pick_dir);
     group.add(&pick_box);
 
-    // List of selected paths (refreshed on change)
+    // List of tracked folders (refreshed on change); breathing room between
+    // the buttons and the list.
     let list_box = gtk::Box::new(gtk::Orientation::Vertical, 4);
+    list_box.set_margin_top(12);
     group.add(&list_box);
 
     let rebuild_list = {
@@ -1018,15 +1017,9 @@ fn manual_page(settings: &gio::Settings) -> adw::PreferencesPage {
                     .and_then(|n| n.to_str())
                     .unwrap_or("<path>")
                     .to_string();
-                let is_dir = p.is_dir();
                 row.set_title(&name);
                 row.set_subtitle(&p.to_string_lossy());
-                let icon = if is_dir {
-                    "folder-symbolic"
-                } else {
-                    "image-x-generic-symbolic"
-                };
-                row.add_prefix(&gtk::Image::from_icon_name(icon));
+                row.add_prefix(&gtk::Image::from_icon_name("folder-symbolic"));
                 let remove_btn = gtk::Button::from_icon_name("user-trash-symbolic");
                 remove_btn.add_css_class("flat");
                 remove_btn.set_tooltip_text(Some("Remove"));
@@ -1041,49 +1034,15 @@ fn manual_page(settings: &gio::Settings) -> adw::PreferencesPage {
                 list_box.append(&row);
             }
             if crate::manual::paths().is_empty() {
-                let empty = gtk::Label::new(Some("Nothing selected yet"));
+                let empty = gtk::Label::new(Some("No folders added yet"));
                 empty.add_css_class("dimmed");
                 list_box.append(&empty);
             }
         }
     };
 
-    // File chooser: files (multi-select)
-    {
-        let rebuild = rebuild_list.clone();
-        pick_files.connect_clicked(move |_| {
-            let dialog = gtk::FileDialog::new();
-            dialog.set_title("Pick wallpapers");
-            let rebuild = rebuild.clone();
-            dialog.open_multiple(
-                None::<&gtk::Window>,
-                gio::Cancellable::NONE,
-                move |result| {
-                    let Ok(files) = result else { return };
-                    let paths: Vec<std::path::PathBuf> = (0..files.n_items())
-                        .filter_map(|i| files.item(i))
-                        .filter_map(|obj| obj.downcast::<gio::File>().ok())
-                        .filter_map(|f| f.path())
-                        .collect();
-                    if paths.is_empty() {
-                        return;
-                    }
-                    let rebuild = rebuild.clone();
-                    crate::tokio_handle().spawn_blocking(move || {
-                        if let Err(e) = crate::manual::add(&paths) {
-                            tracing::warn!("manual add failed: {e}");
-                        }
-                    });
-                    // Rebuild after the blocking write completes.
-                    glib::spawn_future_local(async move {
-                        rebuild();
-                    });
-                },
-            );
-        });
-    }
-
-    // Folder chooser: expands to all images inside (one level)
+    // Folder chooser: the folder itself is tracked; its images are expanded
+    // lazily at refresh time (so files added later are picked up too).
     {
         let rebuild = rebuild_list.clone();
         pick_dir.connect_clicked(move |_| {
@@ -1114,7 +1073,7 @@ fn manual_page(settings: &gio::Settings) -> adw::PreferencesPage {
     rebuild_list();
     {
         let rebuild = rebuild_list.clone();
-        settings.connect_changed(Some("manual-paths"), move |_, _| {
+        settings.connect_changed(Some("manual-folders"), move |_, _| {
             rebuild();
         });
     }
