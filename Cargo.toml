@@ -9,6 +9,13 @@ license = "GPL-3.0"
 lto = true
 strip = true
 
+# Keep `cargo run` usable during development: an unoptimized `image` crate
+# makes the upscale-to-cover step (decode + 4K resize + re-encode) take
+# seconds instead of milliseconds. Optimize dependencies, keep our crate
+# fast to compile.
+[profile.dev.package."*"]
+opt-level = 2
+
 [dependencies]
 adw = { package = "libadwaita", version = "0.9.2", features = ["v1_5"] }
 ashpd = { version = "0.13.13", default-features = false, features = ["tokio", "frontend"] }
