@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.6.0](https://github.com/tunix/valhalla/compare/v1.5.2...v1.6.0) (2026-11-02)
+
+
+### Features
+
+* **manual:** folder-based sources with multi-folder looping ([#93](https://github.com/tunix/valhalla/issues/93)) ([30f2346](https://github.com/tunix/valhalla/commit/30f2346b0847136a6b503615330e2874d8540f8c))
+
+
+### Bug Fixes
+
+* **packaging:** ship gschemas.compiled next to the binary ([#97](https://github.com/tunix/valhalla/issues/97)) ([4ad904e](https://github.com/tunix/valhalla/commit/4ad904e89e53bde4030d0187b77bc3c0025967ae))
+* **ui:** set minimum size on the preferences dialog ([#95](https://github.com/tunix/valhalla/issues/95)) ([bc33206](https://github.com/tunix/valhalla/commit/bc33206349c60718b64c53402c41d674f297c9da))
+
+
+### Performance Improvements
+
+* optimize dependency crates in dev profile ([#94](https://github.com/tunix/valhalla/issues/94)) ([e8766c9](https://github.com/tunix/valhalla/commit/e8766c96bf1cdbe239106ee2f24123af72cb7d49))
+
 ## [1.5.2](https://github.com/tunix/valhalla/compare/v1.5.1...v1.5.2) (2026-10-28)
 
 
