@@ -1068,7 +1068,7 @@ fn manual_page(settings: &gio::Settings) -> adw::PreferencesPage {
     rebuild_list();
     {
         let rebuild = rebuild_list.clone();
-        settings.connect_changed(Some("manual-paths"), move |_, _| {
+        settings.connect_changed(Some("manual-folders"), move |_, _| {
             rebuild();
         });
     }

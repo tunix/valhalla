@@ -2,39 +2,76 @@
 //! non-recursive) becomes a candidate. Persisted as an absolute path list;
 //! candidates cycle from local files, no network. Theme-matching runs on
 //! the local image via the scheduler's brightness analysis, same as
-//! Favorites. Legacy `manual-paths` entries that point at files keep
-//! working: they are kept in the list and still served.
+//! Favorites — against a small cached thumbnail (one per file version), so
+//! a refresh never full-decodes the actual wallpapers and stays instant.
+//! Legacy `manual-paths` entries that point at files keep working: they
+//! are kept in the list and still served.
 
 use gio::prelude::*;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
-/// Settings key storing the picked paths (newline-separated). GSettings
-/// string arrays would be nicer but a plain string survives the simple
-/// schema and the few-path scale we target.
-const PATHS_KEY: &str = "manual-paths";
+/// Settings key storing the picked paths as a GSettings string array
+/// (`as`) — one path per element, the native dconf representation.
+const PATHS_KEY: &str = "manual-folders";
+
+/// Older builds stored the paths in `manual-paths` as a single
+/// newline-separated string. That key is kept in the schema (type `s`) so
+/// existing user data stays readable — a type change would make GSettings
+/// silently drop the old value — and is migrated to [`PATHS_KEY`] on first
+/// read, then reset to its default.
+const LEGACY_KEY: &str = "manual-paths";
 
 /// Same settings instance the app/daemon uses.
 pub fn settings() -> gio::Settings {
     crate::config::settings()
 }
 
-pub fn paths_with(s: &gio::Settings) -> Vec<PathBuf> {
-    s.string(PATHS_KEY)
+/// One-time conversion of the legacy `manual-paths` string into the
+/// `manual-folders` array. Idempotent: the legacy key is reset after a
+/// successful migration, so a second call finds no user value and does
+/// nothing. Never clobbers newer `manual-folders` data.
+fn migrate_legacy(s: &gio::Settings) {
+    if s.user_value(PATHS_KEY).is_some() {
+        return; // already using the array key — leave it alone
+    }
+    let Some(user) = s.user_value(LEGACY_KEY) else {
+        return; // nothing to migrate
+    };
+    // Old format: one string, paths joined by newlines.
+    let legacy: Vec<String> = user
+        .str()
+        .unwrap_or("")
         .split('\n')
+        .filter(|l| !l.is_empty())
+        .map(str::to_string)
+        .collect();
+    if legacy.is_empty() {
+        return;
+    }
+    if s.set_strv(PATHS_KEY, legacy).is_ok() {
+        s.reset(LEGACY_KEY); // migration complete: drop the old value
+    }
+}
+
+pub fn paths_with(s: &gio::Settings) -> Vec<PathBuf> {
+    migrate_legacy(s);
+    s.strv(PATHS_KEY)
+        .into_iter()
         .filter(|l| !l.is_empty())
         .map(PathBuf::from)
         .collect()
 }
 
-/// Replace the picked set (files + directories already expanded by the
-/// caller). Persists as newline-separated absolute paths.
+/// Replace the picked set (folders + legacy file entries). Persists as a
+/// GSettings string array.
 pub fn store_with(s: &gio::Settings, paths: &[PathBuf]) -> Result<(), String> {
-    let joined = paths
+    let strv: Vec<String> = paths
         .iter()
         .map(|p| p.to_string_lossy().into_owned())
-        .collect::<Vec<_>>()
-        .join("\n");
-    s.set_string(PATHS_KEY, &joined).map_err(|e| e.to_string())
+        .collect();
+    s.set_strv(PATHS_KEY, strv).map_err(|e| e.to_string())
 }
 
 /// Convenience wrappers: open the default settings themselves (UI callers
@@ -145,12 +182,89 @@ pub fn candidates() -> Result<Vec<crate::source::Candidate>, String> {
     Ok(cands)
 }
 
+/// Analysis-thumbnail cache key: path + file size + mtime. Editing or
+/// replacing a folder's image produces a fresh key, so stale thumbnails
+/// never serve analysis; unchanged files hit the cached copy instantly.
+fn thumb_key(p: &Path) -> String {
+    let (size, mtime) = match std::fs::metadata(p) {
+        Ok(m) => (
+            m.len(),
+            m.modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_nanos())
+                .unwrap_or(0),
+        ),
+        Err(_) => (0, 0),
+    };
+    let mut hasher = DefaultHasher::new();
+    p.hash(&mut hasher);
+    hasher.write_u64(size);
+    hasher.write_u128(mtime);
+    format!("{:016x}", hasher.finish())
+}
+
+/// Small pre-scaled analysis copy for a manual image, shared with the
+/// Favorites thumbnail store (`thumbs/`), keyed by path+size+mtime —
+/// generated once per file version, reused on every refresh. Mirrors
+/// `favorites::ensure_thumb`: without it the scheduler would full-decode
+/// every wallpaper on each refresh, seconds of work that feels exactly
+/// like a network download.
+fn ensure_thumb(p: &Path) -> PathBuf {
+    let key = thumb_key(p);
+    let dest = crate::favorites::thumb_path(&format!("manual-{key}"));
+    if dest.exists() {
+        return dest;
+    }
+    let generated = (|| -> Result<PathBuf, String> {
+        // Same bound as favorites: brightness sampling downscales to 64×64
+        // anyway, and small sources are analyzed directly (no decode).
+        let dims = image::ImageReader::open(p)
+            .and_then(|r| r.with_guessed_format())
+            .map_err(|e| e.to_string())?
+            .into_dimensions()
+            .map_err(|e| e.to_string())?;
+        if dims.0.max(dims.1) <= crate::favorites::THUMB_MAX_EDGE {
+            return Ok(p.to_path_buf());
+        }
+        let img = image::ImageReader::open(p)
+            .and_then(|r| r.with_guessed_format())
+            .map_err(|e| e.to_string())?
+            .decode()
+            .map_err(|e| e.to_string())?;
+        let small = img.thumbnail(
+            crate::favorites::THUMB_MAX_EDGE,
+            crate::favorites::THUMB_MAX_EDGE,
+        );
+        // tmp + rename so a concurrent refresh never sees a half-written
+        // thumbnail (same pattern as favorites::ensure_thumb).
+        let tmp = crate::favorites::thumbs_dir().join(format!("manual-{key}.tmp"));
+        small
+            .write_to(
+                &mut std::io::BufWriter::new(
+                    std::fs::File::create(&tmp).map_err(|e| e.to_string())?,
+                ),
+                image::ImageFormat::Jpeg,
+            )
+            .map_err(|e| e.to_string())?;
+        std::fs::rename(&tmp, &dest).map_err(|e| e.to_string())?;
+        Ok(dest)
+    })();
+    match generated {
+        Ok(path) => path,
+        Err(e) => {
+            tracing::debug!("thumbnail for manual {p:?} not generated: {e}");
+            p.to_path_buf() // scheduler falls back to the full-size decode
+        }
+    }
+}
+
 fn candidate_for(p: &Path) -> crate::source::Candidate {
     crate::source::Candidate {
         id: format!("manual:{}", p.display()),
         source: "manual",
         image_url: format!("file://{}", p.display()),
-        thumb_url: format!("file://{}", p.display()),
+        thumb_url: format!("file://{}", ensure_thumb(p).display()),
         web_url: String::new(),
         title: p
             .file_stem()
@@ -196,8 +310,10 @@ mod tests {
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         let s = temp_settings("manual");
-        // Memory backend persists across tests in one process — start clean.
-        settings().set_string(PATHS_KEY, "").unwrap();
+        // Memory backend persists across tests in one process — start clean
+        // on BOTH keys (the legacy one would otherwise migrate into runs).
+        settings().reset(PATHS_KEY);
+        settings().reset(LEGACY_KEY);
         let tmp = std::env::temp_dir().join(format!("valhalla-manual-{}", std::process::id()));
         let _ = fs::remove_dir_all(&tmp);
         fs::create_dir_all(&tmp).unwrap();
@@ -213,7 +329,7 @@ mod tests {
 
         // 1) empty state (reset may race other tests on the shared memory
         // backend, so assert on the reset itself rather than isolation)
-        s.set_string(PATHS_KEY, "").unwrap();
+        s.reset(PATHS_KEY);
         assert!(paths().is_empty());
         assert!(candidates().is_err()); // graceful empty error
 
@@ -270,7 +386,7 @@ mod tests {
         assert!(added.is_empty(), "non-image file must be skipped");
 
         // 10) empty-but-tracked folders give a graceful error, not a panic
-        s.set_string(PATHS_KEY, "").unwrap();
+        s.reset(PATHS_KEY);
         // nonexistent path is neither dir nor file -> skipped silently
         let added = add(&[tmp.join("empty-never-created")]).expect("nonexistent skipped");
         assert!(added.is_empty());
@@ -299,11 +415,183 @@ mod tests {
         store_with(&s, &[p1.clone(), p2.clone()]).expect("store");
         let read = paths_with(&s);
         assert_eq!(read, vec![p1, p2]);
+    }
 
-        // whitespace/empty lines in the stored string are skipped
-        s.set_string(PATHS_KEY, "\n/tmp/a.jpg\n\n/tmp/b.jpg\n")
+    #[test]
+    fn legacy_string_value_migrates_to_array() {
+        // Pre-array builds stored manual-paths as one newline-separated
+        // string; the first read migrates it into manual-folders (a real
+        // string array — dconf shows @as [...]) and resets the old key.
+        let _env = crate::http::test_env::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let s = temp_settings("migrate");
+        s.reset(PATHS_KEY);
+        s.set_string(LEGACY_KEY, "/tmp/a.jpg\n/tmp/b dir\n")
             .unwrap();
         let read = paths_with(&s);
-        assert_eq!(read.len(), 2, "empty lines must be skipped");
+        assert_eq!(
+            read,
+            vec![PathBuf::from("/tmp/a.jpg"), PathBuf::from("/tmp/b dir")]
+        );
+        // The migration persisted: the new key holds a real array (dconf
+        // shows @as [...]) with both paths, and the legacy key is back at
+        // its default — no lingering user data.
+        assert_eq!(
+            s.user_value(PATHS_KEY).unwrap().type_().as_str(),
+            "as",
+            "migrated value must be a string array"
+        );
+        assert!(s.user_value(LEGACY_KEY).is_none());
+        // Idempotent: a second read is a no-op and keeps the data.
+        assert_eq!(paths_with(&s), read);
+
+        // New data written after a migration is never clobbered by the
+        // legacy key.
+        store_with(&s, &[PathBuf::from("/tmp/new.png")]).unwrap();
+        assert_eq!(paths_with(&s), vec![PathBuf::from("/tmp/new.png")]);
+        s.reset(PATHS_KEY);
+        s.reset(LEGACY_KEY);
+    }
+
+    #[test]
+    fn thumb_cache_reuses_and_invalidates() {
+        // Analysis thumbnails are cached under the favorites thumbs store,
+        // keyed by path+size+mtime: unchanged files reuse the cached copy,
+        // an edited file gets a fresh one. XDG_DATA_HOME is process-global —
+        // held under ENV_LOCK like every other env-mutating test.
+        let _env = crate::http::test_env::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let tmp =
+            std::env::temp_dir().join(format!("valhalla-manual-thumb-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+
+        // A large image (> 256px) forces a real thumbnail generation.
+        let big = tmp.join("big.jpg");
+        let img = image::RgbImage::from_pixel(512, 512, image::Rgb([200, 100, 50]));
+        image::DynamicImage::ImageRgb8(img)
+            .write_to(
+                &mut std::io::BufWriter::new(fs::File::create(&big).unwrap()),
+                image::ImageFormat::Jpeg,
+            )
+            .unwrap();
+
+        // First candidates() call generates the thumbnail; the served
+        // thumb_url points at the small cached copy, not the full image.
+        store(std::slice::from_ref(&big)).unwrap();
+        let cands = candidates().expect("candidates");
+        let thumb = PathBuf::from(cands[0].thumb_url.strip_prefix("file://").unwrap());
+        assert!(thumb.is_file(), "cached thumbnail must exist");
+        assert_ne!(thumb, big, "thumb_url must be the cached copy");
+        let dims = image::ImageReader::open(&thumb)
+            .unwrap()
+            .into_dimensions()
+            .unwrap();
+        assert!(dims.0.max(dims.1) <= crate::favorites::THUMB_MAX_EDGE);
+
+        // Second call with an unchanged file reuses the same file (mtime
+        // untouched) — the instant-refresh path.
+        let mtime = fs::metadata(&thumb).unwrap().modified().unwrap();
+        candidates().expect("second candidates");
+        assert_eq!(
+            fs::metadata(&thumb).unwrap().modified().unwrap(),
+            mtime,
+            "thumbnail must be reused, not regenerated"
+        );
+
+        // Replacing the file (new content -> new size) invalidates the
+        // cache: a fresh thumbnail is generated for the new version.
+        let img2 = image::RgbImage::from_pixel(600, 400, image::Rgb([10, 200, 80]));
+        image::DynamicImage::ImageRgb8(img2)
+            .write_to(
+                &mut std::io::BufWriter::new(fs::File::create(&big).unwrap()),
+                image::ImageFormat::Jpeg,
+            )
+            .unwrap();
+        candidates().expect("candidates after edit");
+        let cands = candidates().expect("candidates");
+        let thumb2 = PathBuf::from(cands[0].thumb_url.strip_prefix("file://").unwrap());
+        assert_ne!(thumb2, thumb, "edited file must get a new thumbnail");
+
+        // A corrupt source falls back gracefully: the full-size path is
+        // handed to the scheduler (which then skips the candidate), no panic.
+        let corrupt = tmp.join("corrupt.jpg");
+        fs::write(&corrupt, b"not an image").unwrap();
+        store(std::slice::from_ref(&corrupt)).unwrap();
+        let cands = candidates().expect("candidates with corrupt file");
+        let c = cands.iter().find(|c| c.id.contains("corrupt")).unwrap();
+        assert!(c.thumb_url.ends_with("corrupt.jpg"));
+
+        fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn thumb_analysis_is_far_cheaper_than_full_decode() {
+        // The reason for the thumbnail cache, stated as a budget: analyzing
+        // a cache-hitting manual candidate must cost a fraction of a full
+        // wallpaper decode. Real-size synthetic images (2560×1440 JPEG).
+        let _env = crate::http::test_env::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let tmp =
+            std::env::temp_dir().join(format!("valhalla-manual-bench-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+        let big = tmp.join("wide.jpg");
+        let img = image::RgbImage::from_pixel(2560, 1440, image::Rgb([120, 130, 140]));
+        image::DynamicImage::ImageRgb8(img)
+            .write_to(
+                &mut std::io::BufWriter::new(fs::File::create(&big).unwrap()),
+                image::ImageFormat::Jpeg,
+            )
+            .unwrap();
+
+        // Cold: first candidates() generates the thumbnail.
+        let cold_start = std::time::Instant::now();
+        store(std::slice::from_ref(&big)).unwrap();
+        let cands = candidates().expect("candidates");
+        let cold = cold_start.elapsed();
+        let thumb_bytes = fs::read(
+            cands[0]
+                .thumb_url
+                .strip_prefix("file://")
+                .expect("file thumb"),
+        )
+        .unwrap();
+        assert!(
+            thumb_bytes.len() < 100 * 1024,
+            "thumb is small, not the full image"
+        );
+
+        // Warm: cache hit — analyze from the cached thumb bytes.
+        let warm_start = std::time::Instant::now();
+        let cands = candidates().expect("warm candidates");
+        let bytes = fs::read(
+            cands[0]
+                .thumb_url
+                .strip_prefix("file://")
+                .expect("file thumb"),
+        )
+        .unwrap();
+        crate::brightness::analyze(&bytes).expect("analyze thumb");
+        let warm = warm_start.elapsed();
+
+        // What the cache saves: a full-size decode + analysis.
+        let full_start = std::time::Instant::now();
+        let full_bytes = fs::read(&big).unwrap();
+        crate::brightness::analyze(&full_bytes).expect("analyze full");
+        let full = full_start.elapsed();
+
+        eprintln!(
+            "manual refresh analysis budget: warm(cached)={warm:?}, cold(gen+analyze)={cold:?}, full-decode={full:?}"
+        );
+        assert!(
+            warm < full / 3,
+            "cached analysis must be far cheaper than full decode (warm={warm:?}, full={full:?})"
+        );
+
+        fs::remove_dir_all(&tmp).ok();
     }
 }
