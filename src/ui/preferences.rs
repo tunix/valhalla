@@ -311,6 +311,11 @@ fn assemble(stack: gtk::Stack) -> adw::Dialog {
         .title("Preferences")
         .content_width(820)
         .content_height(600)
+        // Breakpoint-using AdwDialogs have no minimum size; libadwaita warns
+        // unless both requests are set. 360 matches the collapsed narrow
+        // breakpoint (max-width: 560sp) while keeping the 820x600 default.
+        .width_request(360)
+        .height_request(360)
         .child(&split)
         .build();
 
