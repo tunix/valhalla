@@ -5,6 +5,7 @@ use image::imageops::FilterType;
 /// Scale the image at `path` up so it covers the screen when it is smaller.
 /// Returns `Ok(true)` when the file was re-encoded in place.
 pub fn upscale_to_cover(path: &Path, screen_w: i32, screen_h: i32) -> Result<bool, String> {
+    let started = std::time::Instant::now();
     let img = image::open(path).map_err(|e| format!("decode failed: {e}"))?;
     let (w, h) = (img.width() as i32, img.height() as i32);
     if w >= screen_w && h >= screen_h {
@@ -48,7 +49,10 @@ pub fn upscale_to_cover(path: &Path, screen_w: i32, screen_h: i32) -> Result<boo
         }
     }
     std::fs::rename(&tmp, path).map_err(|e| e.to_string())?;
-    tracing::info!("upscaled wallpaper {w}x{h} -> {target_w}x{target_h}");
+    tracing::info!(
+        "upscaled wallpaper {w}x{h} -> {target_w}x{target_h} in {}ms",
+        started.elapsed().as_millis()
+    );
     Ok(true)
 }
 
