@@ -63,6 +63,26 @@ jobs:
         id: clippy
         run: cargo clippy --all-targets -- -D warnings
 
+      # Regression gate for the v1.5.2 release-tarball startup abort
+      # ("Settings schema 'io.github.tunix.valhalla' is not installed"):
+      # the binary must survive startup in a clean environment where NO
+      # schema is installed — only the gschemas.compiled build.rs drops
+      # next to the binary may satisfy the schema lookup. The daemon runs
+      # until killed, so pass = timeout's exit 124; the GLib-GIO abort
+      # surfaces as 134/101 and fails the step.
+      - name: Smoke test clean-env startup
+        run: |
+          set -eu
+          dnf install -y dbus-daemon
+          mkdir scratch
+          export XDG_CONFIG_HOME="$PWD/scratch" XDG_DATA_HOME="$PWD/scratch" XDG_CACHE_HOME="$PWD/scratch"
+          rc=0
+          dbus-run-session -- timeout 10 ./target/debug/valhalla --daemon || rc=$?
+          if [ "$rc" -ne 124 ]; then
+            echo "::error::binary aborted at startup in a clean env (exit $rc)"
+            exit 1
+          fi
+
       - name: Job summary
         if: always()
         run: |
