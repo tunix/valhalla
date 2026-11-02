@@ -21,10 +21,43 @@ fn main() {
         .expect("blueprint-compiler not found; install it (dnf install blueprint-compiler)");
     assert!(status.success(), "blueprint-compiler failed on window.blp");
 
-    // 2. Bundle the GSettings schema so Settings::new() works without a system install.
+    // 2. Compile the GSettings schema for the portable artifacts. GLib
+    //    never reads schemas from a GResource: the default schema source
+    //    only looks for compiled `gschemas.compiled` files under the XDG
+    //    data dirs and GSETTINGS_SCHEMA_DIR. The tarball/AppImage ship
+    //    gschemas.compiled next to the binary; main.rs points
+    //    GSETTINGS_SCHEMA_DIR there when the exe dir carries one.
     let schema = "io.github.tunix.valhalla.gschema.xml";
     fs::copy(manifest.join("data").join(schema), out.join(schema)).expect("copy gschema");
     println!("cargo:rerun-if-changed=data/{schema}");
+    // glib-compile-schemas writes gschemas.compiled into the directory it
+    // scans (no --target on older GLib, e.g. Ubuntu 22.04's 2.72), so
+    // compile OUT_DIR itself — the only *.gschema.xml there is ours.
+    let status = Command::new("glib-compile-schemas")
+        .arg(&out)
+        .status()
+        .expect("glib-compile-schemas not found");
+    assert!(status.success(), "glib-compile-schemas failed");
+
+    // 2b. Drop the compiled schema next to the binary (target/<profile>/)
+    //     so release packaging ships it and dev runs find it via the
+    //     exe-dir lookup in main.rs. OUT_DIR is
+    //     <target>/<profile>/build/<pkg>-<hash>/out; only treat the copy
+    //     as valid when that layout holds (it can be redirected).
+    let mut ancestors = out.ancestors();
+    let _out = ancestors.next();
+    let _pkg = ancestors.next();
+    let build_dir = ancestors.next();
+    let profile_dir = ancestors.next();
+    if let (Some(build_dir), Some(profile_dir)) = (build_dir, profile_dir) {
+        if build_dir.file_name().is_some_and(|name| name == "build") {
+            fs::copy(
+                out.join("gschemas.compiled"),
+                profile_dir.join("gschemas.compiled"),
+            )
+            .expect("copy gschemas.compiled next to the binary");
+        }
+    }
 
     // 3. Generate and compile the GResource bundle.
     let icon_dir = manifest.join("data/icons/hicolor/scalable/apps");
@@ -49,9 +82,6 @@ fn main() {
         r#"<?xml version="1.0" encoding="UTF-8"?><gresources><gresource prefix="/io/github/tunix/valhalla">"#,
     );
     xml.push_str(r#"<file compressed="true" alias="window.ui">window.ui</file>"#);
-    xml.push_str(&format!(
-        r#"<file compressed="true" alias="{schema}">{schema}</file>"#
-    ));
     xml.push_str(
         r#"<file compressed="true" alias="icons/hicolor/scalable/apps/io.github.tunix.valhalla.svg">io.github.tunix.valhalla.svg</file>"#,
     );
