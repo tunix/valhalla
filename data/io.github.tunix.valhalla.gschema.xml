@@ -59,7 +59,7 @@
     <key name="manual-folders" type="as">
       <default>[]</default>
       <summary>Manual wallpaper folders</summary>
-      <description>Absolute paths picked by the user: folders whose images cycle, plus legacy file entries.</description>
+      <description>Absolute paths of folders picked by the user; every image directly inside them cycles as a candidate.</description>
     </key>
     <key name="start-at-login" type="b">
       <default>false</default>
