@@ -32,6 +32,16 @@
   </screenshots>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="1.6.0" date="2026-11-02">
+      <description>
+        <ul>
+          <li>**manual:** folder-based sources with multi-folder looping ([#93](https://github.com/tunix/valhalla/issues/93)) ([30f2346](https://github.com/tunix/valhalla/commit/30f2346b0847136a6b503615330e2874d8540f8c))</li>
+          <li>**packaging:** ship gschemas.compiled next to the binary ([#97](https://github.com/tunix/valhalla/issues/97)) ([4ad904e](https://github.com/tunix/valhalla/commit/4ad904e89e53bde4030d0187b77bc3c0025967ae))</li>
+          <li>**ui:** set minimum size on the preferences dialog ([#95](https://github.com/tunix/valhalla/issues/95)) ([bc33206](https://github.com/tunix/valhalla/commit/bc33206349c60718b64c53402c41d674f297c9da))</li>
+          <li>optimize dependency crates in dev profile ([#94](https://github.com/tunix/valhalla/issues/94)) ([e8766c9](https://github.com/tunix/valhalla/commit/e8766c96bf1cdbe239106ee2f24123af72cb7d49))</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.5.2" date="2026-10-28">
       <description>
         <ul>
@@ -95,13 +105,6 @@
         <ul>
           <li>**source:** Pexels, Pixabay, Bing daily archive and NASA APOD sources ([ba5c37d](https://github.com/tunix/valhalla/commit/ba5c37de57cd407bfd617c7ec13388fb42fe05e7))</li>
           <li>**ui:** heart button reflects favorite state; pop animation ([d15f8a2](https://github.com/tunix/valhalla/commit/d15f8a2df25d630df2edcf1f72e30bbe4e324e7a))</li>
-        </ul>
-      </description>
-    </release>
-    <release version="1.2.0" date="2026-10-12">
-      <description>
-        <ul>
-          <li>**ui:** manual wallpaper source — pick files or a folder ([#53](https://github.com/tunix/valhalla/issues/53)) ([7f051b3](https://github.com/tunix/valhalla/commit/7f051b3f8be36354191cc05893ef927d5497f99b))</li>
         </ul>
       </description>
     </release>
