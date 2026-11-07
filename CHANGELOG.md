@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.6.1](https://github.com/tunix/valhalla/compare/v1.6.0...v1.6.1) (2026-11-07)
+
+
+### Bug Fixes
+
+* **deps:** update rust crate ashpd to 0.14.0 ([#100](https://github.com/tunix/valhalla/issues/100)) ([ab7b536](https://github.com/tunix/valhalla/commit/ab7b536a6f8246bb3ca29c42a6520eb28551948b))
+* **manual:** folders only — drop single-file entries ([#98](https://github.com/tunix/valhalla/issues/98)) ([d57ab33](https://github.com/tunix/valhalla/commit/d57ab332d4c82df0174348e2ec0835b338c9b535))
+
 ## [1.6.0](https://github.com/tunix/valhalla/compare/v1.5.2...v1.6.0) (2026-11-02)
 
 
