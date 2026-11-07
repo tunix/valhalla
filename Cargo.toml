@@ -18,7 +18,7 @@ opt-level = 2
 
 [dependencies]
 adw = { package = "libadwaita", version = "0.9.2", features = ["v1_5"] }
-ashpd = { version = "0.13.13", default-features = false, features = ["tokio", "frontend"] }
+ashpd = { version = "0.14.0", default-features = false, features = ["tokio", "frontend"] }
 async-channel = "2.3.3"
 fastrand = "2.5.0"
 fslock = "0.2.1"
