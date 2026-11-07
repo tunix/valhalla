@@ -4,8 +4,8 @@
 //! the local image via the scheduler's brightness analysis, same as
 //! Favorites — against a small cached thumbnail (one per file version), so
 //! a refresh never full-decodes the actual wallpapers and stays instant.
-//! Legacy `manual-paths` entries that point at files keep working: they
-//! are kept in the list and still served.
+//! Single-file entries are not supported: only directories are accepted,
+//! and file entries that survive from very old builds are pruned.
 
 use gio::prelude::*;
 use std::collections::hash_map::DefaultHasher;
@@ -107,30 +107,27 @@ fn images_in_dir(dir: &Path) -> Result<Vec<PathBuf>, String> {
     Ok(entries)
 }
 
-/// Add folders (and, for legacy callers, individual image files) to the
-/// stored list. Duplicates are skipped; order is preserved. Returns the
-/// entries actually added.
+/// Add folders to the stored list. Duplicates are skipped; order is
+/// preserved. Returns the entries actually added. Single files are not
+/// accepted — the manual source cycles folders.
 pub fn add(picked: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
     let mut current = paths();
     let mut added = Vec::new();
     for p in picked {
-        if p.is_dir() {
-            if current.contains(p) || added.contains(p) {
-                continue; // folder already tracked
-            }
-            added.push(p.clone());
-        } else if is_image_file(p) && !current.contains(p) && !added.contains(p) {
-            added.push(p.clone());
+        if !p.is_dir() {
+            continue; // files and nonexistent paths are not tracked
         }
-        // Legacy file entries are only queued in `added` here — they are
-        // appended to `current` once below, so they are never duplicated.
+        if current.contains(p) || added.contains(p) {
+            continue; // folder already tracked
+        }
+        added.push(p.clone());
     }
     current.extend(added.iter().cloned());
     store(&current)?;
     Ok(added)
 }
 
-/// Drop a path (a tracked folder or a legacy file entry) from the list.
+/// Drop a tracked folder from the list.
 pub fn remove(path: &Path) -> Result<(), String> {
     let current = paths();
     let remaining: Vec<PathBuf> = current
@@ -147,8 +144,11 @@ pub fn remove(path: &Path) -> Result<(), String> {
 /// Present the manual set as refreshable candidates (file:// URLs like
 /// Favorites — the scheduler short-circuits download + analysis). Every
 /// tracked folder contributes all images inside it (one level), so
-/// multiple folders loop together; legacy file entries are served too.
-/// Vanished folders/files are pruned lazily.
+/// multiple folders loop together. Single-file entries are not served:
+/// leftovers from very old builds are pruned from the store on the first
+/// refresh (they cannot come back — nothing writes them anymore).
+/// Vanished folders are left in place: a temporarily unmounted folder
+/// must not lose its slot, it just contributes nothing until it returns.
 pub fn candidates() -> Result<Vec<crate::source::Candidate>, String> {
     let stored = paths();
     if stored.is_empty() {
@@ -156,6 +156,7 @@ pub fn candidates() -> Result<Vec<crate::source::Candidate>, String> {
     }
     let mut cands = Vec::new();
     let mut seen = std::collections::HashSet::new();
+    let mut stale_files = Vec::new();
     for p in stored {
         let items: Vec<PathBuf> = if p.is_dir() {
             match images_in_dir(&p) {
@@ -165,15 +166,28 @@ pub fn candidates() -> Result<Vec<crate::source::Candidate>, String> {
                     Vec::new()
                 }
             }
-        } else if is_image_file(&p) {
-            vec![p]
         } else {
-            Vec::new() // vanished file or unreadable path — prune lazily
+            // Not a directory: a leftover file entry (pruned below) or a
+            // vanished/unreadable path (kept — it may return).
+            if p.is_file() {
+                tracing::debug!("manual: pruning file entry {p:?}");
+                stale_files.push(p);
+            }
+            Vec::new()
         };
         for image in items {
             if seen.insert(image.clone()) {
                 cands.push(candidate_for(&image));
             }
+        }
+    }
+    if !stale_files.is_empty() {
+        let remaining: Vec<PathBuf> = paths()
+            .into_iter()
+            .filter(|p| !stale_files.contains(p))
+            .collect();
+        if let Err(e) = store(&remaining) {
+            tracing::debug!("manual: pruning stale file entries failed: {e}");
         }
     }
     if cands.is_empty() {
@@ -351,27 +365,23 @@ mod tests {
         let cands = candidates().expect("candidates");
         assert_eq!(cands.len(), 2, "both folders must contribute");
 
-        // 5) legacy file entries still work alongside folders
-        let added = add(std::slice::from_ref(&a)).expect("add legacy file");
-        assert_eq!(added, vec![a.clone()]);
-        let cands = candidates().expect("candidates");
-        assert_eq!(cands.len(), 3);
-        let cand_a = cands.iter().find(|c| c.id.contains("a.jpg")).unwrap();
-        assert!(cand_a.image_url.starts_with("file://"));
-        assert_eq!(cand_a.title.as_deref(), Some("a"));
+        // 5) single files are not accepted at all
+        let added = add(std::slice::from_ref(&a)).expect("add file rejected");
+        assert!(added.is_empty(), "single files must not be tracked");
+        assert_eq!(paths().len(), 2);
 
-        // 6) duplicates are skipped (folder and file)
-        let added = add(&[tmp.join("folder"), a.clone()]).expect("re-add");
+        // 6) duplicate folders are skipped
+        let added = add(&[tmp.join("folder"), tmp.join("folder2")]).expect("re-add");
         assert!(added.is_empty());
-        assert_eq!(paths().len(), 3);
+        assert_eq!(paths().len(), 2);
 
-        // 7) remove drops a tracked folder; the other folder + file remain
+        // 7) remove drops a tracked folder; the other folder remains
         remove(&tmp.join("folder")).expect("remove");
         let all = paths();
-        assert_eq!(all.len(), 2);
+        assert_eq!(all.len(), 1);
         assert!(!all.contains(&tmp.join("folder")));
         let cands = candidates().expect("candidates");
-        assert_eq!(cands.len(), 2, "folder2 + legacy file");
+        assert_eq!(cands.len(), 1, "folder2 only");
 
         // 8) vanished folder pruned lazily at candidates()
         let ghost = tmp.join("gone");
@@ -381,11 +391,19 @@ mod tests {
         let cands = candidates().expect("candidates");
         assert!(!cands.iter().any(|c| c.id.contains("gone")));
 
-        // 9) non-image file add is skipped (not a dir, not an image ext)
+        // 9) non-image file add is skipped (not a dir)
         let added = add(std::slice::from_ref(&txt)).expect("add txt");
         assert!(added.is_empty(), "non-image file must be skipped");
 
-        // 10) empty-but-tracked folders give a graceful error, not a panic
+        // 10) file entries left by very old builds are pruned from the
+        // store on the first refresh and never served
+        store_with(&s, &[tmp.join("folder2"), a.clone(), txt.clone()]).unwrap();
+        let cands = candidates().expect("candidates");
+        assert_eq!(cands.len(), 1, "only the folder contributes");
+        let all = paths();
+        assert_eq!(all, vec![tmp.join("folder2")], "file entries pruned");
+
+        // 11) empty-but-tracked folders give a graceful error, not a panic
         s.reset(PATHS_KEY);
         // nonexistent path is neither dir nor file -> skipped silently
         let added = add(&[tmp.join("empty-never-created")]).expect("nonexistent skipped");
@@ -480,7 +498,9 @@ mod tests {
 
         // First candidates() call generates the thumbnail; the served
         // thumb_url points at the small cached copy, not the full image.
-        store(std::slice::from_ref(&big)).unwrap();
+        // (The manual source tracks folders, so the image is stored inside
+        // the tracked directory.)
+        store(std::slice::from_ref(&tmp)).unwrap();
         let cands = candidates().expect("candidates");
         let thumb = PathBuf::from(cands[0].thumb_url.strip_prefix("file://").unwrap());
         assert!(thumb.is_file(), "cached thumbnail must exist");
@@ -519,7 +539,6 @@ mod tests {
         // handed to the scheduler (which then skips the candidate), no panic.
         let corrupt = tmp.join("corrupt.jpg");
         fs::write(&corrupt, b"not an image").unwrap();
-        store(std::slice::from_ref(&corrupt)).unwrap();
         let cands = candidates().expect("candidates with corrupt file");
         let c = cands.iter().find(|c| c.id.contains("corrupt")).unwrap();
         assert!(c.thumb_url.ends_with("corrupt.jpg"));
@@ -550,7 +569,7 @@ mod tests {
 
         // Cold: first candidates() generates the thumbnail.
         let cold_start = std::time::Instant::now();
-        store(std::slice::from_ref(&big)).unwrap();
+        store(std::slice::from_ref(&tmp)).unwrap();
         let cands = candidates().expect("candidates");
         let cold = cold_start.elapsed();
         let thumb_bytes = fs::read(
