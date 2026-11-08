@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.2](https://github.com/tunix/valhalla/compare/v1.6.1...v1.6.2) (2026-11-08)
+
+
+### Bug Fixes
+
+* **source:** append .jpg to bing /th URLs to stop 404s ([#103](https://github.com/tunix/valhalla/issues/103)) ([acecfe1](https://github.com/tunix/valhalla/commit/acecfe19cc5165ae62a9544f19a2201d7f11f807))
+
 ## [1.6.1](https://github.com/tunix/valhalla/compare/v1.6.0...v1.6.1) (2026-11-07)
 
 
