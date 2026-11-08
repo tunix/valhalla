@@ -12,6 +12,11 @@ Theme-aware wallpaper switcher for Linux desktops. Rust + GTK4/libadwaita, Damas
 - `cargo build` / `cargo test` / `cargo fmt` / `cargo clippy --all-targets` — clippy and fmt must be clean before committing.
 - GUI: `cargo run` · Headless: `cargo run -- --daemon`
 - Commits: small and meaningful, conventional style (`feat:`, `chore:`). Never push unless explicitly asked.
+- Work in a `git worktree` when the main checkout is occupied (the owner develops in parallel): `git worktree add ../valhalla-<topic> -b <branch>`. Never hold the primary checkout hostage to one task.
+
+## Repo hygiene
+
+- NEVER commit images to the repository except these: app/brand icons under `data/icons/` (build assets, the README logo is the app icon) and the two README/AppStream showcase screenshots `docs/screenshots/dark.png` + `docs/screenshots/light.png`. No PR proof images, no screenshot iterations, no image test fixtures (generate or inline them in test code), no asset branches — PR proof screenshots go into the PR description, never into git. Every committed image stays in every clone forever: published releases are immutable, so their tags pin old history and it can never be purged.
 
 ## Product rules
 
