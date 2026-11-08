@@ -48,11 +48,12 @@ pub async fn candidates() -> Result<Vec<Candidate>, String> {
         .images
         .into_iter()
         .map(|img| {
-            // url is capped at 1920px; urlbase + "1920x1080" style params
-            // give more control. The uhd endpoint serves the native copy.
-            let image_url = format!("https://www.bing.com{}UHD&qlt=100", img.urlbase);
+            // Bing's /th endpoint 404s without a file extension, so the
+            // dimension/quality suffixes must end in ".jpg". urlbase is
+            // capped at 1920px; the _UHD variant serves the native copy.
+            let image_url = format!("https://www.bing.com{}_UHD.jpg&qlt=100", img.urlbase);
             // Small copy for the brightness analysis.
-            let thumb_url = format!("https://www.bing.com{}_1920x1080", img.urlbase);
+            let thumb_url = format!("https://www.bing.com{}_1920x1080.jpg", img.urlbase);
             Candidate {
                 id: format!(
                     "bing-{}",
@@ -153,11 +154,11 @@ mod tests {
         assert_eq!(c.source, "bing");
         assert_eq!(
             c.image_url,
-            "https://www.bing.com/th?id=OHR.Test_EN-US9UHD&qlt=100"
+            "https://www.bing.com/th?id=OHR.Test_EN-US9_UHD.jpg&qlt=100"
         );
         assert_eq!(
             c.thumb_url,
-            "https://www.bing.com/th?id=OHR.Test_EN-US9_1920x1080"
+            "https://www.bing.com/th?id=OHR.Test_EN-US9_1920x1080.jpg"
         );
         assert_eq!(c.title.as_deref(), Some("Morning fog"));
     }
