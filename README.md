@@ -15,8 +15,8 @@ blinding white wallpaper.
 ## Screenshots
 
 <p align="center">
-  <img src="docs/screenshots/dark.png" width="380" alt="Valhalla in dark theme with a dark wallpaper"/>
-  <img src="docs/screenshots/light.png" width="380" alt="Valhalla in light theme with a light wallpaper"/>
+  <img src="docs/screenshots/dark.webp" width="380" alt="Valhalla in dark theme with a dark wallpaper"/>
+  <img src="docs/screenshots/light.webp" width="380" alt="Valhalla in light theme with a light wallpaper"/>
 </p>
 
 ## Features

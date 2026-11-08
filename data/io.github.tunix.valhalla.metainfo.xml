@@ -20,13 +20,16 @@
     <control>keyboard</control>
     <control>touch</control>
   </supports>
+  <!-- Pinned to the immutable v1.6.2 tag: release tags can never move, so
+       these PNG URLs stay valid forever while main ships WebP copies only
+       (keeps clones small). Point at a newer tag when the shots change. -->
   <screenshots>
     <screenshot type="default">
-      <image>https://raw.githubusercontent.com/tunix/valhalla/main/docs/screenshots/dark.png</image>
+      <image>https://raw.githubusercontent.com/tunix/valhalla/v1.6.2/docs/screenshots/dark.png</image>
       <caption>Dark style wallpaper in dark mode</caption>
     </screenshot>
     <screenshot>
-      <image>https://raw.githubusercontent.com/tunix/valhalla/main/docs/screenshots/light.png</image>
+      <image>https://raw.githubusercontent.com/tunix/valhalla/v1.6.2/docs/screenshots/light.png</image>
       <caption>Light style wallpaper in light mode</caption>
     </screenshot>
   </screenshots>

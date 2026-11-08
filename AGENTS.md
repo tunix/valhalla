@@ -16,7 +16,7 @@ Theme-aware wallpaper switcher for Linux desktops. Rust + GTK4/libadwaita, Damas
 
 ## Repo hygiene
 
-- NEVER commit images to the repository except these: app/brand icons under `data/icons/` (build assets, the README logo is the app icon) and the two README/AppStream showcase screenshots `docs/screenshots/dark.png` + `docs/screenshots/light.png`. No PR proof images, no screenshot iterations, no image test fixtures (generate or inline them in test code), no asset branches — PR proof screenshots go into the PR description, never into git. Every committed image stays in every clone forever: published releases are immutable, so their tags pin old history and it can never be purged.
+- NEVER commit images to the repository except these: app/brand icons under `data/icons/` (build assets, the README logo is the app icon) and the two README showcase screenshots `docs/screenshots/dark.webp` + `docs/screenshots/light.webp` (lossy WebP, q80 — keep them small; the AppStream metainfo points at the PNGs pinned under the immutable `v1.6.2` tag instead). No PR proof images, no screenshot iterations, no image test fixtures (generate or inline them in test code), no asset branches — PR proof screenshots go into the PR description, never into git. Every committed image stays in every clone forever: published releases are immutable, so their tags pin old history and it can never be purged.
 
 ## Product rules
 
