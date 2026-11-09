@@ -391,13 +391,24 @@ impl Core {
         let mut chosen: Option<(crate::source::Candidate, std::path::PathBuf)> = None;
         for c in pool.iter().take(8) {
             // Favorites candidates point at local copies (file:// URLs) —
-            // no download; the copy is applied directly.
-            let path: Result<std::path::PathBuf, String> =
-                if let Some(local) = c.image_url.strip_prefix("file://") {
-                    Ok(std::path::PathBuf::from(local))
+            // no download; the copy is applied directly. SVG/JXL locals
+            // (Manual folders) are rasterized into the wallpaper cache as
+            // plain PNG first: the `image` crate cannot decode them for
+            // the fit check, and gdk-pixbuf has no JXL loader on most
+            // distros, so the desktop must be handed pixels it can render.
+            let path: Result<std::path::PathBuf, String> = if let Some(local) =
+                c.image_url.strip_prefix("file://")
+            {
+                let p = std::path::PathBuf::from(local);
+                if crate::raster::needs_rasterize(&p) {
+                    let target = screen.map(|s| (s.width.max(1) as u32, s.height.max(1) as u32));
+                    crate::raster::rasterize_into(&p, &http::wallpapers_dir(), target)
                 } else {
-                    http::download_image(&c.image_url, &http::wallpapers_dir()).await
-                };
+                    Ok(p)
+                }
+            } else {
+                http::download_image(&c.image_url, &http::wallpapers_dir()).await
+            };
             match path {
                 Ok(p) => {
                     chosen = Some((c.clone(), p));

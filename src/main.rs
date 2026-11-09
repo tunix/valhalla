@@ -8,6 +8,7 @@ mod favorites;
 mod fit;
 mod http;
 mod manual;
+mod raster;
 mod scheduler;
 mod screen;
 mod source;

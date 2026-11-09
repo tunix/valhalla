@@ -6,6 +6,10 @@
 //! a refresh never full-decodes the actual wallpapers and stays instant.
 //! Single-file entries are not supported: only directories are accepted,
 //! and file entries that survive from very old builds are pruned.
+//! SVG and JPEG XL files are accepted too — they are rasterized through
+//! `raster.rs` for analysis thumbnails, and the applied wallpaper is a
+//! plain PNG copy in the app cache (see the scheduler's local-candidate
+//! path).
 
 use gio::prelude::*;
 use std::collections::hash_map::DefaultHasher;
@@ -84,8 +88,10 @@ pub fn store(paths: &[PathBuf]) -> Result<(), String> {
     store_with(&settings(), paths)
 }
 
-/// Image extensions we accept when expanding a directory.
-const IMAGE_EXTS: &[&str] = &["jpg", "jpeg", "png", "webp", "bmp", "avif"];
+/// Image extensions we accept when expanding a directory. SVG and JXL
+/// (`raster::RASTERIZED_EXTS`) are included: the Manual source accepts
+/// them and every consumer rasters them via `raster.rs`.
+const IMAGE_EXTS: &[&str] = &["jpg", "jpeg", "png", "webp", "bmp", "avif", "svg", "jxl"];
 
 fn is_image_file(p: &Path) -> bool {
     p.is_file()
@@ -231,29 +237,59 @@ fn ensure_thumb(p: &Path) -> PathBuf {
         return dest;
     }
     let generated = (|| -> Result<PathBuf, String> {
-        // Same bound as favorites: brightness sampling downscales to 64×64
-        // anyway, and small sources are analyzed directly (no decode).
-        let dims = image::ImageReader::open(p)
-            .and_then(|r| r.with_guessed_format())
-            .map_err(|e| e.to_string())?
-            .into_dimensions()
-            .map_err(|e| e.to_string())?;
-        if dims.0.max(dims.1) <= crate::favorites::THUMB_MAX_EDGE {
-            return Ok(p.to_path_buf());
-        }
-        let img = image::ImageReader::open(p)
-            .and_then(|r| r.with_guessed_format())
-            .map_err(|e| e.to_string())?
-            .decode()
-            .map_err(|e| e.to_string())?;
+        let ext = p
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        // Formats the `image` crate cannot read: rasterize straight to the
+        // small analysis copy (SVG rendered at thumbnail size, JXL decoded
+        // then downscaled). Always a real raster thumb — the scheduler
+        // analyzes thumb bytes with image::load_from_memory, so falling
+        // back to the original path would make the candidate unusable.
+        let img = if crate::raster::ext_is_rasterized(&ext) {
+            if ext == "svg" {
+                let data = std::fs::read(p).map_err(|e| e.to_string())?;
+                crate::raster::rasterize_svg(
+                    &data,
+                    Some((
+                        crate::favorites::THUMB_MAX_EDGE,
+                        crate::favorites::THUMB_MAX_EDGE,
+                    )),
+                )?
+            } else {
+                crate::raster::decode_jxl_file(p)?
+            }
+        } else {
+            // Same bound as favorites: brightness sampling downscales to
+            // 64×64 anyway, and small sources are analyzed directly (no
+            // decode).
+            let dims = image::ImageReader::open(p)
+                .and_then(|r| r.with_guessed_format())
+                .map_err(|e| e.to_string())?
+                .into_dimensions()
+                .map_err(|e| e.to_string())?;
+            if dims.0.max(dims.1) <= crate::favorites::THUMB_MAX_EDGE {
+                return Ok(p.to_path_buf());
+            }
+            image::ImageReader::open(p)
+                .and_then(|r| r.with_guessed_format())
+                .map_err(|e| e.to_string())?
+                .decode()
+                .map_err(|e| e.to_string())?
+        };
         let small = img.thumbnail(
             crate::favorites::THUMB_MAX_EDGE,
             crate::favorites::THUMB_MAX_EDGE,
         );
+        // Composite over white: RGB conversion would otherwise carry the
+        // raw (premultiplied-ish) channels of transparent SVG pixels into
+        // the brightness analysis. The raster copy is a JPEG (no alpha).
+        let flat = crate::raster::flatten_white(&small);
         // tmp + rename so a concurrent refresh never sees a half-written
         // thumbnail (same pattern as favorites::ensure_thumb).
         let tmp = crate::favorites::thumbs_dir().join(format!("manual-{key}.tmp"));
-        small
+        image::DynamicImage::ImageRgb8(flat)
             .write_to(
                 &mut std::io::BufWriter::new(
                     std::fs::File::create(&tmp).map_err(|e| e.to_string())?,
@@ -414,6 +450,71 @@ mod tests {
             candidates().is_err(),
             "folder with no images must error gracefully"
         );
+
+        fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn manual_raster_formats_end_to_end() {
+        // SVG and JXL files in a tracked folder are served as candidates,
+        // with real raster analysis thumbnails (the `image` crate cannot
+        // decode either format, so the thumb must be a generated JPEG, not
+        // the original path). Uses the tiny in-code test images from
+        // raster::test_images — no image files are committed.
+        let _env = crate::http::test_env::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        temp_settings("raster").reset(PATHS_KEY);
+        let tmp =
+            std::env::temp_dir().join(format!("valhalla-manual-raster-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+        fs::write(tmp.join("art.svg"), crate::raster::test_images::SVG).unwrap();
+        fs::write(tmp.join("photo.jxl"), crate::raster::test_images::JXL).unwrap();
+        fs::write(tmp.join("notes.txt"), b"not an image").unwrap();
+
+        let added = add(std::slice::from_ref(&tmp)).expect("add folder");
+        assert_eq!(added.len(), 1);
+        let cands = candidates().expect("svg + jxl must be candidates");
+        assert_eq!(cands.len(), 2, "svg and jxl included, notes.txt not");
+        assert!(cands.iter().any(|c| c.image_url.ends_with("art.svg")));
+        assert!(cands.iter().any(|c| c.image_url.ends_with("photo.jxl")));
+
+        // Each thumb is a generated, small, image-crate-decodable raster.
+        for c in &cands {
+            let thumb = PathBuf::from(c.thumb_url.strip_prefix("file://").unwrap());
+            assert_ne!(
+                thumb,
+                PathBuf::from(c.image_url.strip_prefix("file://").unwrap())
+            );
+            assert!(thumb.is_file(), "thumb must exist for {}", c.id);
+            let img = image::open(&thumb).expect("thumb must be decodable");
+            assert!(
+                img.width().max(img.height()) <= crate::favorites::THUMB_MAX_EDGE,
+                "thumb must be small, got {}x{}",
+                img.width(),
+                img.height()
+            );
+        }
+
+        // Unchanged files reuse the cached thumbs on the next refresh.
+        let mtimes: Vec<_> = cands
+            .iter()
+            .map(|c| {
+                fs::metadata(PathBuf::from(c.thumb_url.strip_prefix("file://").unwrap()))
+                    .unwrap()
+                    .modified()
+                    .unwrap()
+            })
+            .collect();
+        candidates().expect("second candidates");
+        for (c, before) in cands.iter().zip(&mtimes) {
+            let after = fs::metadata(PathBuf::from(c.thumb_url.strip_prefix("file://").unwrap()))
+                .unwrap()
+                .modified()
+                .unwrap();
+            assert_eq!(before, &after, "thumb must be reused for {}", c.id);
+        }
 
         fs::remove_dir_all(&tmp).ok();
     }
