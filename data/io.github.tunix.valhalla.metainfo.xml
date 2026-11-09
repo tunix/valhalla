@@ -35,6 +35,13 @@
   </screenshots>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="1.7.0" date="2026-11-09">
+      <description>
+        <ul>
+          <li>**manual:** support SVG and JPEG XL wallpapers ([#106](https://github.com/tunix/valhalla/issues/106)) ([fb6cf62](https://github.com/tunix/valhalla/commit/fb6cf626983cfdf6c4a3f0dd3c66ffd5581b6c94)), closes [#99](https://github.com/tunix/valhalla/issues/99)</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.6.2" date="2026-11-08">
       <description>
         <ul>
@@ -101,13 +108,6 @@
         <ul>
           <li>**ci:** accept update_metainfo.py's exit 1 in the sync step ([73daa53](https://github.com/tunix/valhalla/commit/73daa537157181f3b081448a6cd11bd04e5cb8be))</li>
           <li>**ci:** sync appstream &lt;releases&gt; before bundling flatpak/AppImage ([07e663b](https://github.com/tunix/valhalla/commit/07e663b1e8bedef66a80add99275a058e0df3af9))</li>
-        </ul>
-      </description>
-    </release>
-    <release version="1.3.2" date="2026-10-15">
-      <description>
-        <ul>
-          <li>**ui:** unlike animation + README screenshot refresh ([#61](https://github.com/tunix/valhalla/issues/61)) ([c2219ba](https://github.com/tunix/valhalla/commit/c2219bab5a3100bc1b143034486efe0a9e251d16))</li>
         </ul>
       </description>
     </release>
