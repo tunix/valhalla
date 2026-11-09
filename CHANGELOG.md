@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.0](https://github.com/tunix/valhalla/compare/v1.6.2...v1.7.0) (2026-11-09)
+
+
+### Features
+
+* **manual:** support SVG and JPEG XL wallpapers ([#106](https://github.com/tunix/valhalla/issues/106)) ([fb6cf62](https://github.com/tunix/valhalla/commit/fb6cf626983cfdf6c4a3f0dd3c66ffd5581b6c94)), closes [#99](https://github.com/tunix/valhalla/issues/99)
+
 ## [1.6.2](https://github.com/tunix/valhalla/compare/v1.6.1...v1.6.2) (2026-11-08)
 
 
