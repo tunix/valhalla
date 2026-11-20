@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.1](https://github.com/tunix/valhalla/compare/v1.7.0...v1.7.1) (2026-11-20)
+
+
+### Bug Fixes
+
+* **deps:** update rust crate resvg to 0.50 ([#109](https://github.com/tunix/valhalla/issues/109)) ([13f67ea](https://github.com/tunix/valhalla/commit/13f67ea42ec0971e098f1a19ebbdabfd30a0d671))
+
 ## [1.7.0](https://github.com/tunix/valhalla/compare/v1.6.2...v1.7.0) (2026-11-09)
 
 
