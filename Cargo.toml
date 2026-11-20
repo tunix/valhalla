@@ -31,7 +31,7 @@ image = "0.25.10"
 # (SVG and JPEG XL wallpapers): SVG is rasterized with resvg, JXL is
 # decoded with jxl-oxide (pure Rust, no system libraries).
 jxl-oxide = { version = "0.12", features = ["image"] }
-resvg = "0.49"
+resvg = "0.50"
 libsecret = "0.9.0"
 reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls"] }
 serde = { version = "1.0.229", features = ["derive"] }
