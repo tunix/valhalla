@@ -35,6 +35,14 @@
   </screenshots>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="1.7.1" date="2026-11-22">
+      <description>
+        <ul>
+          <li>**ci:** survive cargo's new build-script directory layout ([#116](https://github.com/tunix/valhalla/issues/116)) ([a1231f4](https://github.com/tunix/valhalla/commit/a1231f4044f3cd1ac81c56c4072430f66a5f46c1))</li>
+          <li>**deps:** update rust crate resvg to 0.50 ([#109](https://github.com/tunix/valhalla/issues/109)) ([13f67ea](https://github.com/tunix/valhalla/commit/13f67ea42ec0971e098f1a19ebbdabfd30a0d671))</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.7.0" date="2026-11-09">
       <description>
         <ul>
@@ -100,14 +108,6 @@
       <description>
         <ul>
           <li>**ci:** appimage sync step needs python3, installed before it runs ([9ac34f5](https://github.com/tunix/valhalla/commit/9ac34f5c35ce8396c089c2f136891b33716e815d))</li>
-        </ul>
-      </description>
-    </release>
-    <release version="1.3.3" date="2026-10-15">
-      <description>
-        <ul>
-          <li>**ci:** accept update_metainfo.py's exit 1 in the sync step ([73daa53](https://github.com/tunix/valhalla/commit/73daa537157181f3b081448a6cd11bd04e5cb8be))</li>
-          <li>**ci:** sync appstream &lt;releases&gt; before bundling flatpak/AppImage ([07e663b](https://github.com/tunix/valhalla/commit/07e663b1e8bedef66a80add99275a058e0df3af9))</li>
         </ul>
       </description>
     </release>
