@@ -41,23 +41,39 @@ fn main() {
 
     // 2b. Drop the compiled schema next to the binary (target/<profile>/)
     //     so release packaging ships it and dev runs find it via the
-    //     exe-dir lookup in main.rs. OUT_DIR is
-    //     <target>/<profile>/build/<pkg>-<hash>/out; only treat the copy
-    //     as valid when that layout holds (it can be redirected).
+    //     exe-dir lookup in main.rs.
+    //     Locate the profile dir by walking OUT_DIR's ancestors up to the
+    //     `build` component and taking the one above it. Do NOT pin a
+    //     layout: cargo moved the build-script tree from
+    //     <target>/<profile>/build/<pkg>-<hash>/out (cargo <= 1.98) to
+    //     <target>/<profile>/build/<pkg>/<hash>/out (cargo >= 1.99),
+    //     which silently defeated the old shape check and left
+    //     gschemas.compiled unshipped (clean-env smoke test then aborts
+    //     with "Settings schema ... is not installed"). Walking to the
+    //     first `build` component also survives custom --target-dir
+    //     overrides (e.g. the coverage job's target/llvm-cov-target).
     let mut ancestors = out.ancestors();
-    let _out = ancestors.next();
-    let _pkg = ancestors.next();
-    let build_dir = ancestors.next();
-    let profile_dir = ancestors.next();
-    if let (Some(build_dir), Some(profile_dir)) = (build_dir, profile_dir) {
-        if build_dir.file_name().is_some_and(|name| name == "build") {
-            fs::copy(
-                out.join("gschemas.compiled"),
-                profile_dir.join("gschemas.compiled"),
-            )
-            .expect("copy gschemas.compiled next to the binary");
+    let mut profile_dir = None;
+    for _ in 0..6 {
+        if let Some(p) = ancestors.next() {
+            if p.file_name().is_some_and(|name| name == "build") {
+                profile_dir = ancestors.next();
+                break;
+            }
         }
     }
+    let Some(profile_dir) = profile_dir else {
+        panic!(
+            "cannot derive target/<profile> dir from OUT_DIR {}",
+            out.display()
+        );
+    };
+    let _ = fs::create_dir_all(profile_dir);
+    fs::copy(
+        out.join("gschemas.compiled"),
+        profile_dir.join("gschemas.compiled"),
+    )
+    .expect("copy gschemas.compiled next to the binary");
 
     // 3. Generate and compile the GResource bundle.
     let icon_dir = manifest.join("data/icons/hicolor/scalable/apps");

@@ -71,6 +71,7 @@ jobs:
       # until killed, so pass = timeout's exit 124; the GLib-GIO abort
       # surfaces as 134/101 and fails the step.
       - name: Smoke test clean-env startup
+        id: smoke
         run: |
           set -eu
           dnf install -y dbus-daemon
@@ -94,6 +95,7 @@ jobs:
           | build | ${{ steps.build.outcome == 'success' && '✅' || '❌' }} |
           | test | ${{ steps.test.outcome == 'success' && '✅' || '❌' }} |
           | clippy | ${{ steps.clippy.outcome == 'success' && '✅' || '❌' }} |
+          | smoke | ${{ steps.smoke.outcome == 'success' && '✅' || '❌' }} |
           | coverage | ${{ needs.coverage.outputs.pct || 'n/a' }}% (min 50%) |
           EOF
 
@@ -104,6 +106,7 @@ jobs:
           BUILD: ${{ steps.build.outcome }}
           TEST: ${{ steps.test.outcome }}
           CLIPPY: ${{ steps.clippy.outcome }}
+          SMOKE: ${{ steps.smoke.outcome }}
           COV: ${{ needs.coverage.outputs.pct }}
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
@@ -120,6 +123,7 @@ jobs:
               `| build | ${mark(process.env.BUILD)} |`,
               `| test | ${mark(process.env.TEST)} |`,
               `| clippy | ${mark(process.env.CLIPPY)} |`,
+              `| smoke | ${mark(process.env.SMOKE)} |`,
               `| coverage | ${process.env.COV || 'n/a'}% |`,
               '',
               `[Full run](${runUrl})`,
